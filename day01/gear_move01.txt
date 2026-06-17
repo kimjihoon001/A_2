@@ -1,10 +1,10 @@
 set_digital_output(1,ON)
 set_digital_output(2,OFF)
-a = Global_RUP
+a = posx(425.18, 150.43, 269.50+100,61.86,-179.93, 61.88)
 movel(a, 50,100)
 
 wait(2.5)
-b = Global_RDOWN
+b = posx(425.18, 150.43, 269.50,61.86,-179.93, 61.88)
 movel(b, 50,100)
 
 set_digital_output(2,ON)
@@ -12,12 +12,12 @@ set_digital_output(1,OFF)
 
 movel(a, 50,100)
 
-c = Global_LUP
+c = posx(424.17,-150.29, 270.88+100, 29.04, 179.83, 29.61)
 movel(c, 50, 100)
 
 wait(2.5)
 
-d = Global_LDOWN
+d = posx(424.17,-150.29, 270.88, 29.04, 179.83, 29.61)
 movel(d, 50, 100)
 
 set_digital_output(1,ON)
