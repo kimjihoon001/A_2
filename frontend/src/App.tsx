@@ -37,7 +37,7 @@ const INITIAL_ROBOT: RobotState = {
   ros2: false,
 };
 
-const DEFAULT_SERVER_URL = 'ws://localhost:8765/ws';
+const DEFAULT_SERVER_URL = `ws://${window.location.hostname}:8765/ws`;
 
 export default function App() {
   const [mode, setMode]           = useState<AppMode>('customer');
