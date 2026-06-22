@@ -585,6 +585,62 @@ class RobotController:
             with self._lock:
                 self.state.pen_force = 0.0
 
+    # ── 자동 Z 캘리브레이션 ──────────────────────────────────────
+    def auto_calibrate_z(self, origin_x: float, origin_y: float) -> dict:
+        """
+        종이 원점 XY에서 Z를 천천히 내려 접촉점 자동 측정.
+        반환: {'contact_z': float, 'pen_up_z': float, 'pen_down_z': float}
+        """
+        Z_START         = 280.0   # 탐색 시작 높이 (mm)
+        FORCE_THRESHOLD = 1.5     # 접촉 감지 임계 힘 (N)
+
+        if self.state.estop:
+            raise RuntimeError("E-STOP 상태에서 Z 측정 불가")
+        if not _dsr_available:
+            raise RuntimeError("실제 로봇 연결 필요 (시뮬 모드에서는 불가)")
+
+        posx   = _dsr_funcs['posx']
+        movel  = _dsr_funcs['movel']
+        DR_BASE = _dsr_funcs['DR_BASE']
+
+        log.info(f"자동 Z 측정 시작: ({origin_x:.1f}, {origin_y:.1f}), 시작 Z={Z_START}")
+
+        start_pos = posx(origin_x, origin_y, Z_START, 0.0, 180.0, 0.0)
+        movel(start_pos, vel=[MOVE_SPEED, MOVE_SPEED], acc=[MOVE_SPEED * 2, MOVE_SPEED * 2], ref=DR_BASE)
+
+        _dsr_funcs['task_compliance_ctrl']([3000, 3000, 100, 3100, 3100, 100])
+        time.sleep(0.05)
+        _dsr_funcs['set_desired_force'](
+            [0, 0, -2.0, 0, 0, 0],
+            dir=[0, 0, 1, 0, 0, 0],
+            mod=_dsr_funcs['DR_FC_MOD_REL'],
+        )
+
+        contact_z = None
+        deadline  = time.time() + 6.0
+        while time.time() < deadline:
+            with self._lock:
+                fz = abs(self.state.tool_force[2]) if len(self.state.tool_force) > 2 else 0
+            if fz >= FORCE_THRESHOLD:
+                tcp = _dsr_funcs['get_current_posx']()
+                if tcp:
+                    contact_z = float(tcp[2])
+                break
+            time.sleep(0.05)
+
+        _dsr_funcs['release_force']()
+        time.sleep(0.03)
+        _dsr_funcs['release_compliance_ctrl']()
+        movel(start_pos, vel=[MOVE_SPEED, MOVE_SPEED], acc=[MOVE_SPEED * 2, MOVE_SPEED * 2], ref=DR_BASE)
+
+        if contact_z is None:
+            raise RuntimeError("접촉 감지 실패 — 종이 없음 또는 Z_START가 너무 낮음")
+
+        pen_up_z   = round(contact_z + 3.0, 2)
+        pen_down_z = round(contact_z + 2.0, 2)
+        log.info(f"Z 측정 완료: 접촉={contact_z:.2f}mm, pen_up={pen_up_z}, pen_down={pen_down_z}")
+        return {'contact_z': round(contact_z, 2), 'pen_up_z': pen_up_z, 'pen_down_z': pen_down_z}
+
     # ── 그리퍼 (RG2, Modbus TCP) ────────────────────────────────
     def gripper_open(self, force: float = 20.0):
         log.info(f"그리퍼 열기 (force={force}N)")

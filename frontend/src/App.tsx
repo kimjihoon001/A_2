@@ -10,6 +10,7 @@ import {
   INITIAL_DRAWING_STATE, RESOLUTIONS,
 } from './constants';
 import { useRobotServer } from './hooks/useRobotServer';
+import type { CalibrateZResult } from './hooks/useRobotServer';
 
 import CustomerScreen  from './pages/CustomerScreen';
 import LoginScreen     from './pages/Login';
@@ -47,7 +48,8 @@ export default function App() {
   const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   const [robotState, setRobotState]     = useState<RobotState>(INITIAL_ROBOT);
   const [drawingState, setDrawingState] = useState<DrawingState>(INITIAL_DRAWING_STATE);
-  const [calibration, setCalibration]   = useState<CalibrationData | null>(null);
+  const [calibration, setCalibration]     = useState<CalibrationData | null>(null);
+  const [calibratedZ,  setCalibratedZ]   = useState<CalibrateZResult | null>(null);
   const [alarms, setAlarms] = useState<Alarm[]>([
     { id: uid(), level: 'info', msg: '시스템 시작됨', time: '00:00:00' },
   ]);
@@ -107,7 +109,7 @@ export default function App() {
           ...prev,
           status:          data.drawStatus as DrawingState['status'],
           currentPixel:    data.currentPixel,
-          totalPixels:     data.totalPixels,
+          totalPixels:     data.totalPixels > 0 ? data.totalPixels : prev.totalPixels,
           currentPenForce: data.currentPenForce,
           message:         data.message,
         };
@@ -153,6 +155,10 @@ export default function App() {
     onDisconnected: () => {
       logsRef.current('[서버] Python 서버 연결 끊김');
       setConn(c => ({ ...c, status: 'disconnected' }));
+    },
+    onCalibrateZResult: (data) => {
+      setCalibratedZ(data);
+      addLog(`[Z 자동측정] 접촉=${data.contact_z}mm → pen_up=${data.pen_up_z}, pen_down=${data.pen_down_z}`);
     },
   });
 
@@ -392,6 +398,8 @@ export default function App() {
           if (serverConnected) server.saveCalibration(data);
         }}
         savedCalib={calibration}
+        onCalibrateZ={() => { if (serverConnected) server.calibrateZ(); }}
+        calibratedZ={calibratedZ}
       />
     ),
     safety: (

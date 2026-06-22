@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { RobotState, CalibrationData } from '../types';
+import type { CalibrateZResult } from '../hooks/useRobotServer';
 
 interface Props {
   robotState: RobotState;
@@ -7,13 +8,15 @@ interface Props {
   onGoHome: () => void;
   onSaveCalibration: (data: CalibrationData) => void;
   savedCalib: CalibrationData | null;
+  onCalibrateZ?: () => void;
+  calibratedZ?: CalibrateZResult | null;
 }
 
 const DEFAULT_CALIB: CalibrationData = {
   origin_x:         463.94,
   origin_y:         171.03,
-  origin_z:         270.30,
-  pen_down_z:       269.30,
+  origin_z:         254.58,
+  pen_down_z:       253.58,
   pixel_spacing_mm:   2.0,
 };
 
@@ -26,10 +29,21 @@ function Row({ label, value, unit }: { label: string; value: string | number; un
   );
 }
 
-export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCalibration, savedCalib }: Props) {
-  const [calib, setCalib] = useState<CalibrationData>(savedCalib ?? DEFAULT_CALIB);
-  const [saved, setSaved] = useState(false);
+export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCalibration, savedCalib, onCalibrateZ, calibratedZ }: Props) {
+  const [calib, setCalib]           = useState<CalibrationData>(savedCalib ?? DEFAULT_CALIB);
+  const [saved, setSaved]           = useState(false);
   const [originSaved, setOriginSaved] = useState(false);
+  const [zMeasuring, setZMeasuring] = useState(false);
+  const [zMeasured,  setZMeasured]  = useState(false);
+
+  // 자동 Z 측정 결과가 오면 캘리브레이션 값에 반영
+  useEffect(() => {
+    if (!calibratedZ) return;
+    setCalib(c => ({ ...c, origin_z: calibratedZ.pen_up_z, pen_down_z: calibratedZ.pen_down_z }));
+    setZMeasuring(false);
+    setZMeasured(true);
+    setTimeout(() => setZMeasured(false), 3000);
+  }, [calibratedZ]);
 
   function setOriginFromTCP() {
     setCalib(c => ({
@@ -99,6 +113,24 @@ export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCa
         {/* Z 높이 + 픽셀 간격 */}
         <div className="card">
           <div className="card-title">Z 높이 설정</div>
+          <button
+            className={zMeasured ? 'btn-success' : 'btn-primary'}
+            style={{ width: '100%', marginBottom: 12 }}
+            disabled={zMeasuring}
+            onClick={() => {
+              setZMeasuring(true);
+              addLog('자동 Z 측정 시작 — 종이에 천천히 내림...');
+              onCalibrateZ?.();
+            }}>
+            {zMeasuring ? '측정 중...' : zMeasured ? '✓ Z 측정 완료' : '자동 Z 측정 (펜 접촉점 자동 감지)'}
+          </button>
+          {calibratedZ && (
+            <div style={{ marginBottom: 12, padding: '8px 12px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
+              접촉 Z: <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{calibratedZ.contact_z} mm</span>
+              &nbsp;→&nbsp; pen_up: <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{calibratedZ.pen_up_z}</span>
+              &nbsp;/ pen_down: <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{calibratedZ.pen_down_z}</span>
+            </div>
+          )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
             {numField('origin_z',   'Pen-up Z (이동 높이)',   'mm')}
             {numField('pen_down_z', 'Pen-down Z (접촉 높이)', 'mm')}

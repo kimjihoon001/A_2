@@ -37,7 +37,7 @@ from std_srvs.srv import Trigger
 _BACKEND = os.path.join(os.path.dirname(__file__), '..', 'backend')
 sys.path.insert(0, _BACKEND)
 
-from config import STATUS_INTERVAL_SEC
+from config import STATUS_INTERVAL_SEC, DEFAULT_CALIBRATION
 from database import Database
 from robot_controller import RobotController
 from drawing_engine import DrawingEngine
@@ -80,6 +80,7 @@ class RobotArtNode(Node):
         self.create_service(Trigger, '/robot_art/home',           self._svc_home)
         self.create_service(Trigger, '/robot_art/gripper_open',   self._svc_gripper_open)
         self.create_service(Trigger, '/robot_art/gripper_close',  self._svc_gripper_close)
+        self.create_service(Trigger, '/robot_art/calibrate_z',    self._svc_calibrate_z)
 
         # ── 상태 주기 발행 ──────────────────────────────────────
         self.create_timer(STATUS_INTERVAL_SEC, self._pub_status)
@@ -155,6 +156,23 @@ class RobotArtNode(Node):
         threading.Thread(target=self.robot.gripper_close, daemon=True).start()
         res.success = True
         res.message = '그리퍼 닫기'
+        return res
+
+    def _svc_calibrate_z(self, req, res):
+        if self.engine.is_running():
+            res.success = False
+            res.message = '그리기 중에는 Z 측정 불가'
+            return res
+        try:
+            calib    = self.db.get_active_calibration() or DEFAULT_CALIBRATION
+            origin_x = float(calib.get('origin_x', 463.94))
+            origin_y = float(calib.get('origin_y', 171.03))
+            result   = self.robot.auto_calibrate_z(origin_x, origin_y)
+            res.success = True
+            res.message = json.dumps(result)
+        except Exception as e:
+            res.success = False
+            res.message = str(e)
         return res
 
     # ── 발행 ────────────────────────────────────────────────────

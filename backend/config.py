@@ -11,13 +11,14 @@ WS_PORT = 8765
 ROBOT_IP   = "192.168.1.100"
 ROBOT_PORT = 12345
 
-# 데이터베이스
-DB_PATH = "data/robot_art.db"
+# 데이터베이스 (config.py 위치 기준 절대경로)
+import os as _os
+DB_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "robot_art.db")
 
-# 종이 Z 좌표 (mm, 로봇 베이스 기준) — pixel_test.py 기준
-# table_high = 242 → hover = 292, ready = 241
-PEN_UP_Z    = 270.30  # 픽셀 간 이동 높이 (접촉 267.30 + 3mm)
-PEN_DOWN_Z  = 269.30  # 종이 근처 하강 높이 (접촉 267.30 + 2mm, 힘 제어로 실제 접촉)
+# 종이 Z 좌표 (mm, 로봇 베이스 기준) — 티치펜던트 실측 2026-06-22 18:28
+# 접촉 Z = 251.58
+PEN_UP_Z    = 254.58  # 픽셀 간 이동 높이 (접촉 251.58 + 3mm)
+PEN_DOWN_Z  = 253.58  # 종이 근처 하강 높이 (접촉 251.58 + 2mm, 힘 제어로 실제 접촉)
 
 # 그리기 시작 전 준비 자세 (관절각도, deg)
 READY_JOINTS = [0.0, 0.0, 90.0, 0.0, 90.0, 0.0]

@@ -50,7 +50,7 @@ class BridgeNode(Node):
         self._svc = {
             name: self.create_client(Trigger, f'/robot_art/{name}')
             for name in ('start', 'stop', 'estop', 'release_estop', 'home',
-                         'gripper_open', 'gripper_close')
+                         'gripper_open', 'gripper_close', 'calibrate_z')
         }
 
         # 상태/로그 구독 (robot_art_node →)
@@ -144,7 +144,10 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    rclpy.shutdown()
+    try:
+        rclpy.shutdown()
+    except Exception:
+        pass
     log.info("서버 종료")
 
 
@@ -197,6 +200,17 @@ async def handle_command(ws: WebSocket, msg: dict):
     elif cmd == "gripper_close":
         result = await asyncio.to_thread(_bridge.call_service, 'gripper_close')
         await ws.send_text(json.dumps({"type": "log", "level": "INFO", "message": result['message']}))
+
+    elif cmd == "calibrate_z":
+        result = await asyncio.to_thread(_bridge.call_service, 'calibrate_z', 10.0)
+        if result['success']:
+            try:
+                z_data = json.loads(result['message'])
+                await ws.send_text(json.dumps({"type": "calibrate_z_result", **z_data}))
+            except Exception:
+                await ws.send_text(json.dumps({"type": "error", "message": "Z 측정 결과 파싱 실패"}))
+        else:
+            await ws.send_text(json.dumps({"type": "error", "message": result['message']}))
 
     # ── DB 직접 조회 (robot_art_node 불필요)
     elif cmd == "get_jobs":

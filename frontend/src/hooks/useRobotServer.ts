@@ -16,12 +16,19 @@ export interface RobotConnInfo {
   protocol: string;
 }
 
+export interface CalibrateZResult {
+  contact_z : number;
+  pen_up_z  : number;
+  pen_down_z: number;
+}
+
 interface ServerCallbacks {
-  onRobotState?  : (state: Partial<RobotState>) => void;
-  onDrawProgress?: (data: DrawingProgressMsg) => void;
-  onLog?         : (msg: string, level: string) => void;
-  onConnected?   : (connInfo?: RobotConnInfo) => void;
-  onDisconnected?: () => void;
+  onRobotState?     : (state: Partial<RobotState>) => void;
+  onDrawProgress?   : (data: DrawingProgressMsg) => void;
+  onLog?            : (msg: string, level: string) => void;
+  onConnected?      : (connInfo?: RobotConnInfo) => void;
+  onDisconnected?   : () => void;
+  onCalibrateZResult?: (data: CalibrateZResult) => void;
 }
 
 interface DrawingProgressMsg {
@@ -83,6 +90,9 @@ export function useRobotServer(url: string, callbacks: ServerCallbacks = {}) {
           case 'log':
             cbRef.current.onLog?.(msg.message, msg.level ?? 'INFO');
             break;
+          case 'calibrate_z_result':
+            cbRef.current.onCalibrateZResult?.(msg as CalibrateZResult);
+            break;
           case 'error':
             cbRef.current.onLog?.(msg.message ?? '서버 명령 처리 실패', 'ERROR');
             break;
@@ -126,5 +136,6 @@ export function useRobotServer(url: string, callbacks: ServerCallbacks = {}) {
     saveCalibration: (data: object) => send({ cmd: 'save_calibration', data }),
     getSettings   : ()          => send({ cmd: 'get_settings' }),
     saveSettings  : (data: object) => send({ cmd: 'save_settings', data }),
+    calibrateZ    : ()          => send({ cmd: 'calibrate_z' }),
   };
 }
