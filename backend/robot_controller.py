@@ -179,6 +179,7 @@ class RobotState:
     speed        : float = 0.0
     gripper_width: float = 85.0
     pen_force    : float = 0.0
+    tool_force   : list  = field(default_factory=lambda: [0.0] * 6)  # [Fx,Fy,Fz,Tx,Ty,Tz] N/Nm
 
 
 class RobotController:
@@ -258,8 +259,14 @@ class RobotController:
                     self.state.tcp_y = round(msg.data[1], 2)
                     self.state.tcp_z = round(msg.data[2], 2)
 
-        sub_node.create_subscription(Float64MultiArray, '/dsr01/msg/joint_state',   _joint_cb, 10)
-        sub_node.create_subscription(Float64MultiArray, '/dsr01/msg/current_posx',  _posx_cb, 10)
+        def _force_cb(msg: Float64MultiArray):
+            if len(msg.data) >= 6:
+                with self._lock:
+                    self.state.tool_force = [round(v, 3) for v in msg.data[:6]]
+
+        sub_node.create_subscription(Float64MultiArray, '/dsr01/msg/joint_state',  _joint_cb, 10)
+        sub_node.create_subscription(Float64MultiArray, '/dsr01/msg/current_posx', _posx_cb, 10)
+        sub_node.create_subscription(Float64MultiArray, '/dsr01/msg/tool_force',   _force_cb, 10)
 
         from rclpy.executors import SingleThreadedExecutor
         sub_executor = SingleThreadedExecutor()
@@ -521,7 +528,20 @@ class RobotController:
                     dir=[0, 0, 1, 0, 0, 0],
                     mod=DR_FC_MOD_REL,
                 )
-                time.sleep(0.5)
+                # 실제 힘이 목표의 70%에 도달할 때까지 대기 (최대 1.5초)
+                t0 = time.time()
+                deadline = t0 + 1.5
+                while time.time() < deadline:
+                    with self._lock:
+                        fz = abs(self.state.tool_force[2]) if len(self.state.tool_force) > 2 else 0
+                    if fz >= force * 0.7:
+                        log.info(f"힘 도달: {fz:.2f}N / 목표 {force}N ({(time.time()-t0)*1000:.0f}ms)")
+                        break
+                    time.sleep(0.02)
+                else:
+                    with self._lock:
+                        fz = abs(self.state.tool_force[2]) if len(self.state.tool_force) > 2 else 0
+                    log.warning(f"힘 도달 타임아웃 (현재 {fz:.2f}N / 목표 {force}N)")
 
                 with self._lock:
                     self.state.pen_force = force
@@ -616,6 +636,7 @@ class RobotController:
                 "speed"        : round(s.speed, 1),
                 "gripperWidth" : round(s.gripper_width, 1),
                 "penForce"     : round(s.pen_force, 2),
+                "toolForce"    : [round(v, 2) for v in s.tool_force],
                 "ros2"         : _dsr_available,
             }
 
