@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>협동로봇 점묘화 시스템 순서도</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #111;
+      background: #1b1b1b;
+      font-family: "Noto Sans KR", "Malgun Gothic", sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: 18px;
+      padding: 16px 28px;
+      color: #f5f5f5;
+      background: #171717;
+      border-bottom: 1px solid #333;
+    }
+    h1 { margin: 0; font-size: 18px; }
+    header p { margin: 0; color: #aaa; font-size: 13px; }
+    .viewport { overflow: auto; padding: 28px; }
+    .canvas {
+      width: max(1180px, calc(100vw - 56px));
+      min-width: 1180px;
+      margin: 0 auto;
+      background: #fff;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, .32);
+    }
+    svg { display: block; width: 100%; height: auto; }
+    .shape { fill: #fff; stroke: #222; stroke-width: 1.7; }
+    .soft { fill: #fafafa; }
+    .line {
+      fill: none;
+      stroke: #222;
+      stroke-width: 1.7;
+      marker-end: url(#arrow);
+    }
+    .bus { fill: none; stroke: #222; stroke-width: 1.7; }
+    .title { font-size: 18px; font-weight: 700; }
+    .text { font-size: 16px; text-anchor: middle; dominant-baseline: middle; }
+    .small { font-size: 13px; }
+    .label { font-size: 14px; font-weight: 700; fill: #333; }
+    .section { font-size: 15px; font-weight: 700; fill: #555; letter-spacing: .04em; }
+    .api { font-size: 13px; fill: #444; }
+    .code {
+      font-family: "D2Coding", "JetBrains Mono", Consolas, monospace;
+      font-size: 11px;
+      font-weight: 400;
+      fill: #555;
+    }
+    @media print {
+      body { background: #fff; }
+      header { display: none; }
+      .viewport { padding: 0; overflow: visible; }
+      .canvas { width: 100%; min-width: 0; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>협동로봇 기반 픽셀 점묘화 시스템</h1>
+    <p>전체 작업 및 상태 처리 순서도 · 가로 스크롤과 브라우저 확대 지원</p>
+  </header>
+
+  <div class="viewport">
+    <div class="canvas">
+      <svg viewBox="0 0 1500 970" role="img" aria-labelledby="chart-title chart-desc">
+        <title id="chart-title">협동로봇 점묘화 시스템 전체 순서도</title>
+        <desc id="chart-desc">연결 확인, 이미지 경로 생성, 로봇 점묘화, 상태 감시와 예외 처리 흐름</desc>
+        <defs>
+          <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="3.5" orient="auto">
+            <path d="M0,0 L8,3.5 L0,7 Z" fill="#222" />
+          </marker>
+        </defs>
+
+        <text x="42" y="40" class="title">M0609 · RG2 · ROS2 픽셀 점묘화 Flow Chart</text>
+
+        <!-- 1. 시스템 시작 및 연결 -->
+        <text x="55" y="84" class="section">SYSTEM START</text>
+        <ellipse class="shape" cx="130" cy="132" rx="82" ry="35" />
+        <text class="text" x="130" y="132">관리자 시작</text>
+
+        <rect class="shape soft" x="255" y="96" width="150" height="72" />
+        <text class="text" x="330" y="112">
+          <tspan x="330">React HMI 접속</tspan><tspan x="330" dy="20" class="code">useRobotServer()</tspan>
+        </text>
+        <path class="line" d="M212 132 H255" />
+
+        <polygon class="shape" points="500,76 570,132 500,188 430,132" />
+        <text class="text" x="500" y="113">
+          <tspan x="500">서버 연결 확인</tspan><tspan x="500" dy="19" class="code">serverConnected</tspan>
+        </text>
+        <path class="line" d="M405 132 H430" />
+
+        <rect class="shape" x="635" y="48" width="165" height="66" />
+        <text class="text" x="717" y="70">
+          <tspan x="717">연결 오류 표시</tspan><tspan x="717" dy="21">3초 후 재시도</tspan>
+        </text>
+        <path class="line" d="M500 76 V81 H635" />
+        <text class="label" x="540" y="68">실패</text>
+        <path class="line" d="M717 48 V28 H500 V76" />
+
+        <polygon class="shape" points="900,76 970,132 900,188 830,132" />
+        <text class="text" x="900" y="111">
+          <tspan x="900">ROS2·로봇</tspan><tspan x="900" dy="19">연결 확인</tspan>
+          <tspan x="900" dy="17" class="code">ros2Connected</tspan>
+        </text>
+        <path class="line" d="M570 132 H830" />
+        <text class="label" x="650" y="154">성공 · WebSocket JSON</text>
+
+        <rect class="shape" x="1035" y="48" width="175" height="66" />
+        <text class="text" x="1122" y="70">
+          <tspan x="1122">실제 연결 실패</tspan><tspan x="1122" dy="21">오류 및 로그 저장</tspan>
+        </text>
+        <path class="line" d="M900 76 V81 H1035" />
+        <text class="label" x="956" y="68">실패</text>
+
+        <rect class="shape" x="1265" y="96" width="165" height="72" />
+        <text class="text" x="1347" y="111">
+          <tspan x="1347">연결 상태</tspan><tspan x="1347" dy="19">HMI 표시</tspan>
+          <tspan x="1347" dy="17" class="code">conn.status</tspan>
+        </text>
+        <path class="line" d="M970 132 H1265" />
+        <text class="label" x="1080" y="121">성공</text>
+
+        <!-- 2. 입력 및 경로 생성 -->
+        <text x="55" y="207" class="section">IMAGE &amp; PATH</text>
+        <path class="line" d="M1347 168 V222 H130" />
+        <rect class="shape" x="55" y="222" width="150" height="74" />
+        <text class="text" x="130" y="238">
+          <tspan x="130">이미지 업로드</tspan><tspan x="130" dy="19">및 편집</tspan>
+          <tspan x="130" dy="17" class="code">pixels[] · gray</tspan>
+        </text>
+
+        <rect class="shape" x="255" y="222" width="170" height="74" />
+        <text class="text" x="340" y="238">
+          <tspan x="340">해상도·용지·힘</tspan><tspan x="340" dy="19">작업 설정</tspan>
+          <tspan x="340" dy="17" class="code">artSettings</tspan>
+        </text>
+        <path class="line" d="M205 259 H255" />
+
+        <rect class="shape" x="480" y="222" width="170" height="74" />
+        <text class="text" x="565" y="238">
+          <tspan x="565">픽셀·회색조</tspan><tspan x="565" dy="19">데이터 생성</tspan>
+          <tspan x="565" dy="17" class="code">resWidth · resHeight</tspan>
+        </text>
+        <path class="line" d="M425 259 H480" />
+
+        <rect class="shape" x="705" y="222" width="175" height="74" />
+        <text class="text" x="792" y="238">
+          <tspan x="792">흰색 픽셀 제외</tspan><tspan x="792" dy="19">접촉력 매핑</tspan>
+          <tspan x="792" dy="17" class="code">_gray_to_force(gray)</tspan>
+        </text>
+        <path class="line" d="M650 259 H705" />
+
+        <rect class="shape" x="935" y="222" width="175" height="74" />
+        <text class="text" x="1022" y="238">
+          <tspan x="1022">S자 경로 및</tspan><tspan x="1022" dy="19">TCP 좌표 변환</tspan>
+          <tspan x="1022" dy="17" class="code">path = _build_path(...)</tspan>
+        </text>
+        <path class="line" d="M880 259 H935" />
+
+        <polygon class="shape" points="1260,203 1330,259 1260,315 1190,259" />
+        <text class="text" x="1260" y="239">
+          <tspan x="1260">건식 실행</tspan><tspan x="1260" dy="19">모드?</tspan>
+          <tspan x="1260" dy="17" class="code">dry_run</tspan>
+        </text>
+        <path class="line" d="M1110 259 H1190" />
+
+        <rect class="shape" x="1190" y="350" width="200" height="62" />
+        <text class="text" x="1290" y="371">
+          <tspan x="1290">경로만 순회</tspan>
+          <tspan x="1290" dy="19" class="code">실제 로봇 이동 없음</tspan>
+        </text>
+        <path class="line" d="M1260 315 V350" />
+        <text class="label" x="1274" y="337">예</text>
+        <path class="line" d="M1290 412 V520 H620 V578 H585" />
+
+        <!-- 3. 로봇 작업 -->
+        <text x="55" y="397" class="section">ROBOT DRAWING</text>
+        <path class="line" d="M1190 259 H1148 V447 H1080" />
+        <text class="label" x="1157" y="246">아니오</text>
+        <rect class="shape" x="900" y="412" width="180" height="70" />
+        <text class="text" x="990" y="426">
+          <tspan x="990">저속·저힘으로</tspan><tspan x="990" dy="19">점묘화 시작</tspan>
+          <tspan x="990" dy="17" class="code">DrawingEngine.start()</tspan>
+        </text>
+
+        <rect class="shape" x="650" y="412" width="185" height="70" />
+        <text class="text" x="742" y="426">
+          <tspan x="742">픽셀 위치 이동</tspan><tspan x="742" dy="19">movel</tspan>
+          <tspan x="742" dy="17" class="code">robot.movel(rx, ry, z)</tspan>
+        </text>
+        <path class="line" d="M900 447 H835" />
+
+        <rect class="shape" x="400" y="412" width="185" height="70" />
+        <text class="text" x="492" y="426">
+          <tspan x="492">회색조별 힘 제어</tspan><tspan x="492" dy="19">8N · 6N · 4N · 2N</tspan>
+          <tspan x="492" dy="17" class="code">force · _pen_force_draw()</tspan>
+        </text>
+        <path class="line" d="M650 447 H585" />
+
+        <rect class="shape" x="150" y="412" width="185" height="70" />
+        <text class="text" x="242" y="426">
+          <tspan x="242">펜 접촉 후 상승</tspan><tspan x="242" dy="19">다음 픽셀 진행</tspan>
+          <tspan x="242" dy="17" class="code">current_pixel = i + 1</tspan>
+        </text>
+        <path class="line" d="M400 447 H335" />
+
+        <polygon class="shape" points="242,524 310,578 242,632 174,578" />
+        <text class="text" x="242" y="549">
+          <tspan x="242">모든 픽셀 완료?</tspan>
+          <tspan x="242" dy="18" class="code">current_pixel</tspan>
+          <tspan x="242" dy="15" class="code">total_pixels</tspan>
+        </text>
+        <path class="line" d="M242 482 V524" />
+        <path class="line" d="M174 578 H104 V447 H150" />
+        <text class="label" x="112" y="567">아니오</text>
+
+        <rect class="shape" x="390" y="543" width="195" height="70" />
+        <text class="text" x="487" y="557">
+          <tspan x="487">작업 결과·시간</tspan><tspan x="487" dy="19">SQLite 저장</tspan>
+          <tspan x="487" dy="17" class="code">finish_job(job_id, ...)</tspan>
+        </text>
+        <path class="line" d="M310 578 H390" />
+        <text class="label" x="333" y="567">예</text>
+
+        <ellipse class="shape" cx="690" cy="578" rx="80" ry="35" />
+        <text class="text" x="690" y="578">작업 종료</text>
+        <path class="line" d="M585 578 H610" />
+
+        <!-- 4. 실시간 상태 감시 -->
+        <text x="800" y="548" class="section">REAL-TIME MONITORING</text>
+        <rect class="shape" x="800" y="568" width="180" height="66" />
+        <text class="text" x="890" y="581">
+          <tspan x="890">Robot State 구독</tspan><tspan x="890" dy="19">J1-J6 · TCP · 힘</tspan>
+          <tspan x="890" dy="17" class="code">robot.get_state()</tspan>
+        </text>
+        <path class="line" d="M742 482 V520 H890 V568" />
+        <text class="api" x="760" y="511">ROS2 Topic</text>
+
+        <rect class="shape" x="1040" y="568" width="180" height="66" />
+        <text class="text" x="1130" y="581">
+          <tspan x="1130">WebSocket 상태</tspan><tspan x="1130" dy="19">실시간 전송</tspan>
+          <tspan x="1130" dy="17" class="code">_status_broadcast_loop()</tspan>
+        </text>
+        <path class="line" d="M980 601 H1040" />
+
+        <rect class="shape" x="1280" y="568" width="165" height="66" />
+        <text class="text" x="1362" y="581">
+          <tspan x="1362">진행률·상태</tspan><tspan x="1362" dy="19">HMI 갱신</tspan>
+          <tspan x="1362" dy="17" class="code">drawingState</tspan>
+        </text>
+        <path class="line" d="M1220 601 H1280" />
+
+        <!-- 5. 명령 및 예외 처리 -->
+        <text x="55" y="705" class="section">CONTROL &amp; EXCEPTION</text>
+        <path class="bus" d="M990 482 V674 H130" />
+
+        <rect class="shape" x="55" y="730" width="150" height="65" />
+        <text class="text" x="130" y="742">
+          <tspan x="130">작업 중단 버튼</tspan>
+          <tspan x="130" dy="20" class="code">cmd: stop</tspan>
+        </text>
+        <path class="line" d="M130 674 V730" />
+
+        <rect class="shape" x="255" y="730" width="150" height="65" />
+        <text class="text" x="330" y="742">
+          <tspan x="330">중단 상태 저장</tspan><tspan x="330" dy="19" class="code">engine.stop()</tspan>
+          <tspan x="330" dy="16" class="code">status: cancelled</tspan>
+        </text>
+        <path class="line" d="M205 762 H255" />
+        <path class="line" d="M330 795 V915 H1150" />
+
+        <rect class="shape" x="500" y="730" width="150" height="65" />
+        <text class="text" x="575" y="746">
+          <tspan x="575">비상정지 버튼</tspan><tspan x="575" dy="19" class="code">cmd: estop</tspan>
+        </text>
+        <path class="line" d="M575 674 V730" />
+
+        <rect class="shape" x="700" y="730" width="190" height="65" />
+        <text class="text" x="795" y="742">
+          <tspan x="795">즉시 모션 정지</tspan><tspan x="795" dy="19">추가 명령 차단</tspan>
+          <tspan x="795" dy="17" class="code">robot.emergency_stop()</tspan>
+        </text>
+        <path class="line" d="M650 762 H700" />
+
+        <polygon class="shape" points="1010,708 1080,762 1010,816 940,762" />
+        <text class="text" x="1010" y="751">
+          <tspan x="1010">로봇 상태</tspan><tspan x="1010" dy="22">정상?</tspan>
+        </text>
+        <path class="line" d="M890 762 H940" />
+
+        <rect class="shape" x="1150" y="682" width="190" height="62" />
+        <text class="text" x="1245" y="703">
+          <tspan x="1245">IDLE / RUNNING 표시</tspan>
+          <tspan x="1245" dy="19" class="code">status: idle · running</tspan>
+        </text>
+        <path class="line" d="M1010 708 V713 H1150" />
+        <text class="label" x="1067" y="699">정상</text>
+
+        <rect class="shape" x="1150" y="780" width="190" height="66" />
+        <text class="text" x="1245" y="802">
+          <tspan x="1245">ERROR·E-STOP</tspan><tspan x="1245" dy="21">알림 표시</tspan>
+        </text>
+        <path class="line" d="M1080 762 H1115 V813 H1150" />
+        <text class="label" x="1093" y="750">오류</text>
+
+        <rect class="shape" x="1150" y="884" width="190" height="62" />
+        <text class="text" x="1245" y="915">오류·중단 로그 저장</text>
+        <path class="line" d="M1245 846 V884" />
+
+        <ellipse class="shape" cx="1430" cy="915" rx="58" ry="31" />
+        <text class="text small" x="1430" y="915">안전 종료</text>
+        <path class="line" d="M1340 915 H1372" />
+
+        <!-- 데이터 저장소 -->
+        <path class="shape" d="M45 850 C45 835 85 828 125 828 C165 828 205 835 205 850 V921 C205 936 165 943 125 943 C85 943 45 936 45 921 Z" />
+        <path class="bus" d="M45 850 C45 865 85 872 125 872 C165 872 205 865 205 850" />
+        <text class="text" x="125" y="896">
+          <tspan x="125">SQLite DB</tspan><tspan x="125" dy="21" class="small">작업·로그·설정</tspan>
+        </text>
+        <path class="line" d="M487 613 V896 H205" />
+        <path class="line" d="M1150 915 H205" />
+      </svg>
+    </div>
+  </div>
+</body>
+</html>
