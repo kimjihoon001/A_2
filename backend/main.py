@@ -1,20 +1,26 @@
 # ================================================================
-# main.py — FastAPI WebSocket 서버
+# main.py — FastAPI WebSocket 브리지 (HMI ↔ ROS2 robot_art_node)
 #
-# 실행: uvicorn main:app --host 0.0.0.0 --port 8765 --reload
-# HMI 연결: ws://[이 PC IP]:8765/ws
+# 실행 순서:
+#   1. ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py ...
+#   2. python3 ros2_node/robot_art_node.py  (robot_art_node)
+#   3. uvicorn main:app --host 0.0.0.0 --port 8765
 # ================================================================
 
 import asyncio
 import json
 import logging
+import threading
 from contextlib import asynccontextmanager
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+from std_srvs.srv import Trigger
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from config import WS_HOST, WS_PORT, STATUS_INTERVAL_SEC, DEFAULT_CALIBRATION
 from database import Database
-from robot_controller import RobotController
-from drawing_engine import DrawingEngine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,17 +29,91 @@ logging.basicConfig(
 )
 log = logging.getLogger("main")
 
-# ── 싱글턴 객체 ─────────────────────────────────────────────────
-db     = Database()
-robot  = RobotController()
-engine = DrawingEngine(robot, db)
-
-# 연결된 HMI 클라이언트 목록 (멀티 클라이언트 지원)
+# ── 공유 상태 ────────────────────────────────────────────────────
+db      = Database()
 _clients: set[WebSocket] = set()
+_loop  : asyncio.AbstractEventLoop = None   # type: ignore
+_last_status: dict = {}                     # ROS2 → HMI 캐시
 
 
+# ── ROS2 브리지 노드 ──────────────────────────────────────────────
+class BridgeNode(Node):
+    """robot_art_node와 통신하는 브리지"""
+
+    def __init__(self):
+        super().__init__('robot_art_bridge')
+
+        # 픽셀 발행 (→ robot_art_node)
+        self._pixels_pub = self.create_publisher(String, '/robot_art/pixels', 10)
+
+        # 서비스 클라이언트
+        self._svc = {
+            name: self.create_client(Trigger, f'/robot_art/{name}')
+            for name in ('start', 'stop', 'estop', 'release_estop', 'home',
+                         'gripper_open', 'gripper_close')
+        }
+
+        # 상태/로그 구독 (robot_art_node →)
+        self.create_subscription(String, '/robot_art/status', self._on_status, 10)
+        self.create_subscription(String, '/robot_art/log',    self._on_log,    10)
+
+    # ── 픽셀 전송 ───────────────────────────────────────────────
+    def publish_pixels(self, pixels: list, settings: dict, image_name: str):
+        msg = String()
+        msg.data = json.dumps(
+            {'pixels': pixels, 'settings': settings, 'imageName': image_name},
+            ensure_ascii=False,
+        )
+        self._pixels_pub.publish(msg)
+
+    # ── 서비스 호출 (동기, 타임아웃 5s) ────────────────────────
+    def call_service(self, name: str, timeout: float = 5.0) -> dict:
+        client = self._svc[name]
+        if not client.wait_for_service(timeout_sec=timeout):
+            return {'success': False, 'message': f'{name} 서비스 응답 없음 (타임아웃 {timeout}s)'}
+        future = client.call_async(Trigger.Request())
+        rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
+        if future.done():
+            r = future.result()
+            return {'success': r.success, 'message': r.message}
+        return {'success': False, 'message': f'{name} 서비스 응답 없음'}
+
+    # ── 구독 콜백 ──────────────────────────────────────────────
+    def _on_status(self, msg: String):
+        global _last_status
+        try:
+            data = json.loads(msg.data)
+            _last_status = data
+            if _loop:
+                asyncio.run_coroutine_threadsafe(broadcast(data), _loop)
+        except Exception:
+            pass
+
+    def _on_log(self, msg: String):
+        try:
+            data = json.loads(msg.data)
+            if _loop:
+                asyncio.run_coroutine_threadsafe(broadcast(data), _loop)
+        except Exception:
+            pass
+
+
+_bridge: BridgeNode = None   # type: ignore
+
+
+# ── 브리지 스레드 (SingleThreadedExecutor) ───────────────────────
+def _ros_spin():
+    from rclpy.executors import SingleThreadedExecutor
+    executor = SingleThreadedExecutor()
+    executor.add_node(_bridge)
+    try:
+        executor.spin()
+    except Exception:
+        pass
+
+
+# ── WebSocket 브로드캐스트 ───────────────────────────────────────
 async def broadcast(data: dict):
-    """연결된 모든 HMI에 메시지 전송"""
     if not _clients:
         return
     msg = json.dumps(data, ensure_ascii=False)
@@ -46,62 +126,29 @@ async def broadcast(data: dict):
     _clients.difference_update(dead)
 
 
-# ── 드로잉 엔진 콜백 — 스레드 → asyncio 이벤트 루프 ────────────
-def _on_draw_progress(data: dict):
-    asyncio.run_coroutine_threadsafe(broadcast(data), _loop)
-
-def _on_draw_log(msg: str, level: str):
-    asyncio.run_coroutine_threadsafe(
-        broadcast({"type": "log", "level": level, "message": msg}),
-        _loop,
-    )
-
-engine.on_progress = _on_draw_progress
-engine.on_log      = _on_draw_log
-
-_loop: asyncio.AbstractEventLoop = None   # type: ignore
-
-
-# ── 상태 주기적 전송 ─────────────────────────────────────────────
-async def _status_broadcast_loop():
-    while True:
-        await asyncio.sleep(STATUS_INTERVAL_SEC)
-        if not _clients:
-            continue
-        robot_st = robot.get_state()
-        await broadcast({
-            "type"          : "status",
-            "robot"         : robot_st,
-            "drawStatus"    : engine.status,
-            "currentPixel"  : engine.current_pixel,
-            "totalPixels"   : engine.total_pixels,
-            "currentPenForce": engine.current_pen_force,
-            "message"       : engine.message,
-            "jobId"         : engine.job_id,
-        })
-
-
 # ── 앱 생명주기 ─────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _loop
+    global _bridge, _loop
+
     _loop = asyncio.get_event_loop()
 
     db.init()
     log.info("DB 초기화 완료")
 
-    robot.connect()
+    rclpy.init()
+    _bridge = BridgeNode()
+    threading.Thread(target=_ros_spin, daemon=True, name="RosBridge").start()
+    log.info("ROS2 브리지 노드 시작")
     log.info(f"서버 시작 — ws://{WS_HOST}:{WS_PORT}/ws")
-
-    asyncio.create_task(_status_broadcast_loop())
 
     yield
 
-    robot.disconnect()
+    rclpy.shutdown()
     log.info("서버 종료")
 
 
-app = FastAPI(title="Robot Art Server", lifespan=lifespan)
+app = FastAPI(title="Robot Art Bridge", lifespan=lifespan)
 
 
 # ── 명령 처리기 ─────────────────────────────────────────────────
@@ -109,7 +156,7 @@ async def handle_command(ws: WebSocket, msg: dict):
     cmd  = msg.get("cmd", "")
     data = msg.get("data", {})
 
-    # ── 그리기 제어
+    # ── 그리기 시작: 픽셀 발행 후 start 서비스 호출
     if cmd == "start_drawing":
         pixels     = msg.get("pixels", [])
         settings   = msg.get("settings", {})
@@ -117,66 +164,53 @@ async def handle_command(ws: WebSocket, msg: dict):
         if not pixels:
             await ws.send_text(json.dumps({"type": "error", "message": "픽셀 데이터가 없습니다."}))
             return
-        try:
-            await asyncio.to_thread(engine.start, pixels, settings, image_name)
-            await ws.send_text(json.dumps({
-                "type": "log", "level": "INFO",
-                "message": f"그리기 시작: {image_name} ({len(pixels):,}픽셀)",
-            }))
-        except RuntimeError as e:
-            await ws.send_text(json.dumps({"type": "error", "message": str(e)}))
+        await asyncio.to_thread(_bridge.publish_pixels, pixels, settings, image_name)
+        await asyncio.sleep(0.1)    # 토픽이 node에 도달할 시간
+        result = await asyncio.to_thread(_bridge.call_service, 'start')
+        level = "INFO" if result['success'] else "ERROR"
+        await ws.send_text(json.dumps({"type": "log", "level": level, "message": result['message']}))
 
     elif cmd == "stop":
-        engine.stop()
+        result = await asyncio.to_thread(_bridge.call_service, 'stop')
         db.add_log("그리기 중단 요청 (HMI)", "WARNING")
-        await ws.send_text(json.dumps({"type": "log", "level": "WARNING", "message": "그리기 중단 요청"}))
+        await ws.send_text(json.dumps({"type": "log", "level": "WARNING", "message": result['message']}))
 
-    # ── 비상정지
     elif cmd == "estop":
-        engine.stop()
-        await asyncio.to_thread(robot.emergency_stop)
+        result = await asyncio.to_thread(_bridge.call_service, 'estop')
         db.add_log("E-STOP 활성화", "ERROR")
-        await broadcast({"type": "log", "level": "ERROR", "message": "E-STOP 활성화"})
+        await broadcast({"type": "log", "level": "ERROR", "message": result['message']})
 
     elif cmd == "reset_estop":
-        robot.release_estop()
+        result = await asyncio.to_thread(_bridge.call_service, 'release_estop')
         db.add_log("E-STOP 해제", "INFO")
-        await broadcast({"type": "log", "level": "INFO", "message": "E-STOP 해제"})
+        await broadcast({"type": "log", "level": "INFO", "message": result['message']})
 
-    # ── 원점 복귀
     elif cmd == "home":
-        if engine.is_running():
-            await ws.send_text(json.dumps({"type": "error", "message": "그리기 중에는 원점 복귀 불가"}))
-            return
-        await asyncio.to_thread(robot.home)
-        await broadcast({"type": "log", "level": "INFO", "message": "원점 복귀 완료"})
+        result = await asyncio.to_thread(_bridge.call_service, 'home')
+        level = "INFO" if result['success'] else "ERROR"
+        await broadcast({"type": "log", "level": level, "message": result['message']})
 
-    # ── 그리퍼
     elif cmd == "gripper_open":
-        force = float(msg.get("force", 20))
-        await asyncio.to_thread(robot.gripper_open, force)
-        await ws.send_text(json.dumps({"type": "log", "level": "INFO", "message": f"그리퍼 열기 ({force}N)"}))
+        result = await asyncio.to_thread(_bridge.call_service, 'gripper_open')
+        await ws.send_text(json.dumps({"type": "log", "level": "INFO", "message": result['message']}))
 
     elif cmd == "gripper_close":
-        force = float(msg.get("force", 20))
-        await asyncio.to_thread(robot.gripper_close, force)
-        await ws.send_text(json.dumps({"type": "log", "level": "INFO", "message": f"그리퍼 닫기 ({force}N)"}))
+        result = await asyncio.to_thread(_bridge.call_service, 'gripper_close')
+        await ws.send_text(json.dumps({"type": "log", "level": "INFO", "message": result['message']}))
 
-    # ── 작업 이력 조회
+    # ── DB 직접 조회 (robot_art_node 불필요)
     elif cmd == "get_jobs":
         page  = int(msg.get("page", 1))
         limit = int(msg.get("limit", 20))
         result = db.get_jobs(page, limit)
         await ws.send_text(json.dumps({"type": "jobs", **result}))
 
-    # ── 로그 조회
     elif cmd == "get_logs":
         limit  = int(msg.get("limit", 100))
         job_id = msg.get("jobId")
         logs   = db.get_logs(limit, job_id)
         await ws.send_text(json.dumps({"type": "logs", "logs": logs}))
 
-    # ── 캘리브레이션
     elif cmd == "get_calibration":
         calib = db.get_active_calibration() or DEFAULT_CALIBRATION
         await ws.send_text(json.dumps({"type": "calibration", "data": calib}))
@@ -193,7 +227,6 @@ async def handle_command(ws: WebSocket, msg: dict):
         history = db.get_calibration_history()
         await ws.send_text(json.dumps({"type": "calibration_history", "data": history}))
 
-    # ── 설정
     elif cmd == "get_settings":
         settings = db.get_settings()
         await ws.send_text(json.dumps({"type": "settings", "data": settings}))
@@ -204,19 +237,9 @@ async def handle_command(ws: WebSocket, msg: dict):
         db.add_log("설정 저장")
         await ws.send_text(json.dumps({"type": "log", "level": "INFO", "message": "설정 저장 완료"}))
 
-    # ── 현재 상태 즉시 조회
     elif cmd == "get_status":
-        robot_st = robot.get_state()
-        await ws.send_text(json.dumps({
-            "type"           : "status",
-            "robot"          : robot_st,
-            "drawStatus"     : engine.status,
-            "currentPixel"   : engine.current_pixel,
-            "totalPixels"    : engine.total_pixels,
-            "currentPenForce": engine.current_pen_force,
-            "message"        : engine.message,
-            "jobId"          : engine.job_id,
-        }))
+        await ws.send_text(json.dumps({**_last_status, "type": "status"} if _last_status
+                           else {"type": "status", "message": "robot_art_node 미연결"}))
 
     else:
         await ws.send_text(json.dumps({"type": "error", "message": f"알 수 없는 명령: {cmd}"}))
@@ -227,27 +250,20 @@ async def handle_command(ws: WebSocket, msg: dict):
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     _clients.add(ws)
-    client = ws.client
-    log.info(f"HMI 연결: {client}")
+    log.info(f"HMI 연결: {ws.client}")
 
-    # 연결 즉시 현재 상태 + 로봇 연결 정보 전송
     await ws.send_text(json.dumps({
-        "type"      : "connected",
-        "message"   : "Robot Art Server 연결 완료",
-        "robot"     : robot.get_state(),
-        "robotConn" : {
-            "ip"      : robot.robot_ip,
-            "port"    : robot.robot_port,
-            "protocol": "ROS2" if robot.get_state().get("ros2") else "Simulation",
-        },
+        "type"   : "connected",
+        "message": "Robot Art Bridge 연결 완료",
+        **({"robot": _last_status.get("robot", {})} if _last_status else {}),
     }))
 
     try:
         while True:
             raw = await ws.receive_text()
             try:
-                msg = json.loads(raw)
-                await handle_command(ws, msg)
+                parsed = json.loads(raw)
+                await handle_command(ws, parsed)
             except json.JSONDecodeError:
                 await ws.send_text(json.dumps({"type": "error", "message": "잘못된 JSON 형식"}))
             except Exception as e:
@@ -255,15 +271,16 @@ async def websocket_endpoint(ws: WebSocket):
                 await ws.send_text(json.dumps({"type": "error", "message": str(e)}))
 
     except WebSocketDisconnect:
-        log.info(f"HMI 연결 해제: {client}")
+        log.info(f"HMI 연결 해제: {ws.client}")
     finally:
         _clients.discard(ws)
 
 
-# ── HTTP 헬스체크 ────────────────────────────────────────────────
+# ── HTTP ────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "robot": robot.get_state()["status"]}
+    status = _last_status.get("robot", {}).get("status", "unknown")
+    return {"status": "ok", "robot": status}
 
 
 @app.get("/jobs")

@@ -16,7 +16,7 @@ DB_PATH = "data/robot_art.db"
 
 # 종이 Z 좌표 (mm, 로봇 베이스 기준) — pixel_test.py 기준
 # table_high = 242 → hover = 292, ready = 241
-PEN_UP_Z    = 274.30  # 픽셀 간 이동 높이 (접촉 267.30 + 7mm)
+PEN_UP_Z    = 270.30  # 픽셀 간 이동 높이 (접촉 267.30 + 3mm)
 PEN_DOWN_Z  = 269.30  # 종이 근처 하강 높이 (접촉 267.30 + 2mm, 힘 제어로 실제 접촉)
 
 # 그리기 시작 전 준비 자세 (관절각도, deg)

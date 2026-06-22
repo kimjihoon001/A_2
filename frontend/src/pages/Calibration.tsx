@@ -12,7 +12,7 @@ interface Props {
 const DEFAULT_CALIB: CalibrationData = {
   origin_x:         463.94,
   origin_y:         171.03,
-  origin_z:         274.30,
+  origin_z:         270.30,
   pen_down_z:       269.30,
   pixel_spacing_mm:   2.0,
 };

@@ -17,24 +17,16 @@ log = logging.getLogger(__name__)
 
 def _gray_to_force(gray: int) -> float | None:
     """
-    계단식 회색값 → 힘 매핑 (10 N ~ 3 N, 8단계).
-    0~25   → 10 N  (검정)
-    26~50  →  9 N
-    51~75  →  8 N
-    76~100 →  7 N
-    101~125→  6 N
-    126~150→  5 N
-    151~175→  4 N
-    176~200→  3 N  (연회색)
+    계단식 회색값 → 힘 매핑 (10 N ~ 3 N, 4단계).
+    0~50   → 10 N  (검정)
+    51~100 →  7 N
+    101~150→  5 N
+    151~200→  3 N  (연회색)
     201~255→ None  (스킵)
     """
-    if   gray <=  25: return 10.0
-    elif gray <=  50: return  9.0
-    elif gray <=  75: return  8.0
+    if   gray <=  50: return 10.0
     elif gray <= 100: return  7.0
-    elif gray <= 125: return  6.0
     elif gray <= 150: return  5.0
-    elif gray <= 175: return  4.0
     elif gray <= 200: return  3.0
     else:             return  None
 

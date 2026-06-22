@@ -165,9 +165,6 @@ def _init_dsr() -> bool:
         return False
 
 
-_init_dsr()
-
-
 # ── 상태 ────────────────────────────────────────────────────────
 @dataclass
 class RobotState:
@@ -196,6 +193,8 @@ class RobotController:
 
     # ── 연결 ────────────────────────────────────────────────────
     def connect(self) -> bool:
+        if not _dsr_available:
+            _init_dsr()
         if _dsr_available:
             self._sync_state_from_robot()   # 초기 TCP 위치
             self._start_joint_subscriber()  # joint_states 토픽 구독
@@ -510,20 +509,19 @@ class RobotController:
                 # 상공 → 종이 근처로 이동
                 ret = movel(hover_pos, vel=MOVE_SPEED, acc=MOVE_SPEED * 2)
                 log.info(f"movel hover ret={ret}")
-                time.sleep(0.1)
                 ret = movel(ready_pos, vel=DRAW_SPEED, acc=DRAW_SPEED * 2)
                 log.info(f"movel ready ret={ret}")
 
                 # 컴플라이언스 + 목표 힘 인가
-                time.sleep(0.1)
+                time.sleep(0.03)
                 _dsr_funcs['task_compliance_ctrl']([3000, 3000, 500, 100, 100, 100])
-                time.sleep(0.1)
+                time.sleep(0.03)
                 _dsr_funcs['set_desired_force'](
                     [0, 0, -force, 0, 0, 0],
                     dir=[0, 0, 1, 0, 0, 0],
                     mod=DR_FC_MOD_REL,
                 )
-                time.sleep(2)
+                time.sleep(0.5)
 
                 with self._lock:
                     self.state.pen_force = force
@@ -531,7 +529,7 @@ class RobotController:
                 # 래스터 스캔 시작점(좌상단)으로 미세 이동
                 amovel(posx(-start_offset, start_offset, 0, 0, 0, 0),
                        vel=10, acc=20, ref=DR_BASE, mod=DR_MV_MOD_REL)
-                time.sleep(0.1)
+                time.sleep(0.05)
 
                 # ㄹ자 패턴
                 lines     = int(pixel_size / pitch)
@@ -539,22 +537,20 @@ class RobotController:
                 for i in range(lines + 1):
                     amovel(posx(direction * pixel_size, 0, 0, 0, 0, 0),
                            vel=10, acc=20, ref=DR_BASE, mod=DR_MV_MOD_REL)
-                    time.sleep(0.2)
+                    time.sleep(0.05)
                     if i < lines:
                         amovel(posx(0, -pitch, 0, 0, 0, 0),
                                vel=10, acc=20, ref=DR_BASE, mod=DR_MV_MOD_REL)
-                        time.sleep(0.1)
+                        time.sleep(0.03)
                         direction *= -1
 
             finally:
                 # 힘 해제 후 상공 복귀
-                time.sleep(0.1)
                 _dsr_funcs['release_force']()
-                time.sleep(0.1)
+                time.sleep(0.03)
                 _dsr_funcs['release_compliance_ctrl']()
                 with self._lock:
                     self.state.pen_force = 0.0
-                time.sleep(0.1)
                 movel(hover_pos, vel=MOVE_SPEED, acc=MOVE_SPEED * 2)
 
         else:
