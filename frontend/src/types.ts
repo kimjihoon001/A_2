@@ -128,6 +128,7 @@ export interface ArtSettings {
   dryRun: boolean;
   originX: number;
   originY: number;
+  drawMode?: 'snake' | 'concentric' | 'contour';
 }
 
 export interface CalibrationData {

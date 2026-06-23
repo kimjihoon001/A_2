@@ -585,6 +585,67 @@ class RobotController:
             with self._lock:
                 self.state.pen_force = 0.0
 
+    def draw_contour_segment(self, points: list[tuple], force: float,
+                             z_up: float, z_dn: float):
+        """
+        등고선 선분: 펜을 내린 채로 points 목록을 movel로 연속 이동.
+        draw_pixel 대비 컴플라이언스 setup/teardown이 선분당 1회라 빠름.
+        """
+        if not points or self.state.estop:
+            return
+
+        if _dsr_available:
+            posx    = _dsr_funcs['posx']
+            movel   = _dsr_funcs['movel']
+            DR_BASE = _dsr_funcs['DR_BASE']
+
+            hover = posx(points[0][0], points[0][1], z_up, 0, 180, 0)
+            ready = posx(points[0][0], points[0][1], z_dn, 0, 180, 0)
+
+            movel(hover, vel=[MOVE_SPEED, MOVE_SPEED], acc=[MOVE_SPEED*2, MOVE_SPEED*2], ref=DR_BASE)
+            movel(ready, vel=[DRAW_SPEED, DRAW_SPEED], acc=[DRAW_SPEED*2, DRAW_SPEED*2], ref=DR_BASE)
+
+            try:
+                _dsr_funcs['task_compliance_ctrl']([3000, 3000, 500, 100, 100, 100])
+                time.sleep(0.03)
+                _dsr_funcs['set_desired_force'](
+                    [0, 0, -force, 0, 0, 0],
+                    dir=[0, 0, 1, 0, 0, 0],
+                    mod=_dsr_funcs['DR_FC_MOD_REL'],
+                )
+                t0 = time.time()
+                while time.time() - t0 < 1.5:
+                    with self._lock:
+                        fz = abs(self.state.tool_force[2]) if len(self.state.tool_force) > 2 else 0
+                    if fz >= force * 0.7:
+                        break
+                    time.sleep(0.02)
+                with self._lock:
+                    self.state.pen_force = force
+
+                for rx, ry in points[1:]:
+                    pos = posx(rx, ry, z_dn, 0, 180, 0)
+                    movel(pos, vel=[DRAW_SPEED, DRAW_SPEED], acc=[DRAW_SPEED*2, DRAW_SPEED*2], ref=DR_BASE)
+
+            finally:
+                _dsr_funcs['release_force']()
+                time.sleep(0.03)
+                _dsr_funcs['release_compliance_ctrl']()
+                with self._lock:
+                    self.state.pen_force = 0.0
+                movel(hover, vel=[MOVE_SPEED, MOVE_SPEED], acc=[MOVE_SPEED*2, MOVE_SPEED*2], ref=DR_BASE)
+
+        else:
+            with self._lock:
+                self.state.pen_force = force
+            time.sleep(len(points) * 0.01)
+            if points:
+                with self._lock:
+                    self.state.tcp_x = points[-1][0]
+                    self.state.tcp_y = points[-1][1]
+            with self._lock:
+                self.state.pen_force = 0.0
+
     # ── 자동 Z 캘리브레이션 ──────────────────────────────────────
     def auto_calibrate_z(self, origin_x: float, origin_y: float) -> dict:
         """

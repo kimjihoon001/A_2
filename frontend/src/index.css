@@ -66,7 +66,8 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-success   { background: var(--green);   color: #fff; }
 .btn-danger    { background: var(--red);     color: #fff; }
 .btn-warning   { background: var(--yellow);  color: #fff; }
-.btn-outline   { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.btn-outline    { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.btn-secondary  { background: #6b4fa0; color: #fff; }
 .btn-ghost     { background: var(--panel2);  color: var(--text); border: 1px solid var(--border); }
 
 .tag {

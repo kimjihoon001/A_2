@@ -448,7 +448,19 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
             style={{ flex: 2, padding: '13px', fontSize: 16, fontWeight: 800, letterSpacing: 1 }}
             disabled={!imageFile || pixelData.length === 0 || isRunning}
             onClick={() => onStartDrawing(pixelData, artSettings, imageFile?.name ?? 'image')}>
-            {isRunning ? '그리는 중...' : '▶ 시작하기'}
+            {isRunning && drawingState.message.includes('S자') ? '그리는 중...' : '▶ S자 시작'}
+          </button>
+          <button className="btn-outline"
+            style={{ flex: 2, padding: '13px', fontSize: 16, fontWeight: 800 }}
+            disabled={!imageFile || pixelData.length === 0 || isRunning}
+            onClick={() => onStartDrawing(pixelData, { ...artSettings, drawMode: 'concentric' }, imageFile?.name ?? 'image')}>
+            {isRunning && drawingState.message.includes('동심원') ? '그리는 중...' : '◎ 동심원 시작'}
+          </button>
+          <button className="btn-secondary"
+            style={{ flex: 2, padding: '13px', fontSize: 16, fontWeight: 800 }}
+            disabled={!imageFile || pixelData.length === 0 || isRunning}
+            onClick={() => onStartDrawing(pixelData, { ...artSettings, drawMode: 'contour' }, imageFile?.name ?? 'image')}>
+            {isRunning && drawingState.message.includes('등고선') ? '그리는 중...' : '〰 등고선 시작'}
           </button>
           <button className="btn-danger"
             style={{ flex: 1, padding: '13px', fontSize: 14 }}
