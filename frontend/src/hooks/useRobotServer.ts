@@ -23,12 +23,14 @@ export interface CalibrateZResult {
 }
 
 interface ServerCallbacks {
-  onRobotState?     : (state: Partial<RobotState>) => void;
-  onDrawProgress?   : (data: DrawingProgressMsg) => void;
-  onLog?            : (msg: string, level: string) => void;
-  onConnected?      : (connInfo?: RobotConnInfo) => void;
-  onDisconnected?   : () => void;
-  onCalibrateZResult?: (data: CalibrateZResult) => void;
+  onRobotState?       : (state: Partial<RobotState>) => void;
+  onDrawProgress?     : (data: DrawingProgressMsg) => void;
+  onLog?              : (msg: string, level: string) => void;
+  onConnected?        : (connInfo?: RobotConnInfo) => void;
+  onDisconnected?     : () => void;
+  onCalibrateZResult? : (data: CalibrateZResult) => void;
+  onCalibrationLoad?  : (data: object) => void;
+  onSettingsLoad?     : (data: object) => void;
 }
 
 interface DrawingProgressMsg {
@@ -61,6 +63,8 @@ export function useRobotServer(url: string, callbacks: ServerCallbacks = {}) {
     ws.onopen = () => {
       setConnected(true);
       ws.send(JSON.stringify({ cmd: 'get_status' }));
+      ws.send(JSON.stringify({ cmd: 'get_calibration' }));
+      ws.send(JSON.stringify({ cmd: 'get_settings' }));
     };
 
     ws.onmessage = (ev) => {
@@ -89,6 +93,12 @@ export function useRobotServer(url: string, callbacks: ServerCallbacks = {}) {
             break;
           case 'log':
             cbRef.current.onLog?.(msg.message, msg.level ?? 'INFO');
+            break;
+          case 'calibration':
+            cbRef.current.onCalibrationLoad?.(msg.data);
+            break;
+          case 'settings':
+            cbRef.current.onSettingsLoad?.(msg.data);
             break;
           case 'calibrate_z_result':
             cbRef.current.onCalibrateZResult?.(msg as CalibrateZResult);
@@ -137,5 +147,6 @@ export function useRobotServer(url: string, callbacks: ServerCallbacks = {}) {
     getSettings   : ()          => send({ cmd: 'get_settings' }),
     saveSettings  : (data: object) => send({ cmd: 'save_settings', data }),
     calibrateZ    : ()          => send({ cmd: 'calibrate_z' }),
+    frameTask     : ()          => send({ cmd: 'frame_task' }),
   };
 }

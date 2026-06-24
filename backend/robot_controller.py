@@ -17,8 +17,10 @@ import time
 import logging
 
 from dataclasses import dataclass, field
-from config import (GRIPPER_OPEN_WIDTH, GRIPPER_CLOSE_WIDTH, DOT_HOLD_SEC,
-                    MOVE_SPEED, DRAW_SPEED, PIXEL_SIZE_MM, PIXEL_PITCH_MM)
+from config import (GRIPPER_OPEN_WIDTH, GRIPPER_CLOSE_WIDTH, GRIPPER_DEFAULT_FORCE,
+                    DOT_HOLD_SEC, MOVE_SPEED, DRAW_SPEED, PIXEL_SIZE_MM, PIXEL_PITCH_MM)
+from database import Database as _Database
+_db = _Database()
 
 # ── OnRobot RG2 Modbus TCP ────────────────────────────────────────
 _GRIPPER_IP   = '192.168.1.1'
@@ -242,6 +244,14 @@ class RobotController:
         global _controller
         self.state = RobotState()
         self._lock = threading.Lock()
+        self._move_speed   = float(MOVE_SPEED)
+        self._dot_hold_sec = float(DOT_HOLD_SEC)
+
+    def load_config(self):
+        """드로잉 시작 전 DB에서 속도 설정 로드."""
+        self._move_speed   = float(_db.get_setting('move_speed',  MOVE_SPEED))
+        self._dot_hold_sec = float(_db.get_setting('dot_hold_ms', DOT_HOLD_SEC * 1000)) / 1000.0
+        log.info(f"속도 설정: 이동={self._move_speed}mm/s, 유지={self._dot_hold_sec*1000:.0f}ms")
         self.robot_ip, self.robot_port = _read_dsr_robot_params()
         _controller = self
 
@@ -293,36 +303,27 @@ class RobotController:
 
     def _start_joint_subscriber(self):
         """
-        /dsr01/msg/joint_state  → 조인트 각도 (degrees, Float64MultiArray)
-        /dsr01/msg/current_posx → TCP 위치 mm (Float64MultiArray)
-        서비스 콜을 쓰는 g_node와 충돌하지 않도록 별도 노드 사용.
+        /dsr01/joint_states     → 조인트 각도 (sensor_msgs/JointState, 라디안) → 도(degree) 변환
+        TCP 위치               → get_current_posx 서비스 폴링 (0.1 Hz)
         """
+        import math
         rclpy = _dsr_funcs['rclpy']
-        from std_msgs.msg import Float64MultiArray
+        from sensor_msgs.msg import JointState
 
         sub_node = rclpy.create_node('robot_art_sub')
 
-        def _joint_cb(msg: Float64MultiArray):
-            joints = [round(v, 2) for v in msg.data]
-            if len(joints) == 6:
-                with self._lock:
-                    self.state.joints = joints
+        def _joint_cb(msg: JointState):
+            if len(msg.name) < 6:
+                return
+            name_to_rad = dict(zip(msg.name, msg.position))
+            try:
+                joints_deg = [round(math.degrees(name_to_rad[f'joint_{i}']), 2) for i in range(1, 7)]
+            except KeyError:
+                return
+            with self._lock:
+                self.state.joints = joints_deg
 
-        def _posx_cb(msg: Float64MultiArray):
-            if len(msg.data) >= 3:
-                with self._lock:
-                    self.state.tcp_x = round(msg.data[0], 2)
-                    self.state.tcp_y = round(msg.data[1], 2)
-                    self.state.tcp_z = round(msg.data[2], 2)
-
-        def _force_cb(msg: Float64MultiArray):
-            if len(msg.data) >= 6:
-                with self._lock:
-                    self.state.tool_force = [round(v, 3) for v in msg.data[:6]]
-
-        sub_node.create_subscription(Float64MultiArray, '/dsr01/msg/joint_state',  _joint_cb, 10)
-        sub_node.create_subscription(Float64MultiArray, '/dsr01/msg/current_posx', _posx_cb, 10)
-        sub_node.create_subscription(Float64MultiArray, '/dsr01/msg/tool_force',   _force_cb, 10)
+        sub_node.create_subscription(JointState, '/dsr01/joint_states', _joint_cb, 10)
 
         from rclpy.executors import SingleThreadedExecutor
         sub_executor = SingleThreadedExecutor()
@@ -331,7 +332,24 @@ class RobotController:
         t.start()
         self._sub_node = sub_node
         self._sub_executor = sub_executor
-        log.info("joint_state / current_posx 토픽 구독 시작")
+
+        def _poll_tcp():
+            import time
+            get_current_posx = _dsr_funcs['get_current_posx']
+            while True:
+                try:
+                    tcp_pos, _ = get_current_posx()  # returns (posx[6], sol)
+                    if tcp_pos:
+                        with self._lock:
+                            self.state.tcp_x = round(float(tcp_pos[0]), 2)
+                            self.state.tcp_y = round(float(tcp_pos[1]), 2)
+                            self.state.tcp_z = round(float(tcp_pos[2]), 2)
+                except Exception:
+                    pass
+                time.sleep(0.5)
+
+        threading.Thread(target=_poll_tcp, daemon=True, name='tcp_poller').start()
+        log.info("joint_states 토픽 구독 및 TCP 폴링 시작")
 
     def disconnect(self):
         with self._lock:
@@ -394,7 +412,10 @@ class RobotController:
 
         if _dsr_available:
             try:
-                _dsr_funcs['move_home'](target=0)  # DR_HOME_TARGET_MECHANIC
+                posj  = _dsr_funcs['posj']
+                movej = _dsr_funcs['movej']
+                home_pos = posj(8.5, 5.45, 82.85, 179.96, -91.70, -171.71)
+                movej(home_pos, vel=30, acc=50)
                 with self._lock:
                     self.state.status = "idle"
                 log.info("원점 복귀 완료")
@@ -506,7 +527,7 @@ class RobotController:
                 self.state.pen_force = force_z
                 self.state.joints    = [j + random.uniform(-0.15, 0.15) for j in self.state.joints]
             if force_z > 0:
-                time.sleep(DOT_HOLD_SEC)
+                time.sleep(self._dot_hold_sec)
             with self._lock:
                 self.state.pen_force = 0.0
 
@@ -541,7 +562,7 @@ class RobotController:
                 time.sleep(0.02)
 
             # 접촉 유지
-            time.sleep(DOT_HOLD_SEC)
+            time.sleep(self._dot_hold_sec)
 
             with self._lock:
                 self.state.pen_force = force_n
@@ -580,7 +601,7 @@ class RobotController:
 
             try:
                 # 상공 → 좌상단으로 이동
-                ret = movel(hover_pos, vel=MOVE_SPEED, acc=MOVE_SPEED * 2)
+                ret = movel(hover_pos, vel=self._move_speed, acc=self._move_speed * 2)
                 log.info(f"movel hover ret={ret}")
 
                 if self.state.estop:
@@ -637,7 +658,7 @@ class RobotController:
                 _dsr_funcs['release_compliance_ctrl']()
                 with self._lock:
                     self.state.pen_force = 0.0
-                movel(hover_pos, vel=MOVE_SPEED, acc=MOVE_SPEED * 2)
+                movel(hover_pos, vel=self._move_speed, acc=self._move_speed * 2)
 
         else:
             # 시뮬레이션
@@ -667,7 +688,7 @@ class RobotController:
 
             hover = posx(points[0][0], points[0][1], z_up, 0, 180, 0)
 
-            movel(hover, vel=[MOVE_SPEED, MOVE_SPEED], acc=[MOVE_SPEED*2, MOVE_SPEED*2], ref=DR_BASE)
+            movel(hover, vel=[self._move_speed, self._move_speed], acc=[self._move_speed*2, self._move_speed*2], ref=DR_BASE)
 
             try:
                 _dsr_funcs['task_compliance_ctrl']([3000, 3000, 500, 100, 100, 100])
@@ -697,7 +718,7 @@ class RobotController:
                 _dsr_funcs['release_compliance_ctrl']()
                 with self._lock:
                     self.state.pen_force = 0.0
-                movel(hover, vel=[MOVE_SPEED, MOVE_SPEED], acc=[MOVE_SPEED*2, MOVE_SPEED*2], ref=DR_BASE)
+                movel(hover, vel=[self._move_speed, self._move_speed], acc=[self._move_speed*2, self._move_speed*2], ref=DR_BASE)
 
         else:
             with self._lock:
@@ -731,7 +752,7 @@ class RobotController:
         log.info(f"자동 Z 측정 시작: ({origin_x:.1f}, {origin_y:.1f}), 시작 Z={Z_START}")
 
         start_pos = posx(origin_x, origin_y, Z_START, 0.0, 180.0, 0.0)
-        movel(start_pos, vel=[MOVE_SPEED, MOVE_SPEED], acc=[MOVE_SPEED * 2, MOVE_SPEED * 2], ref=DR_BASE)
+        movel(start_pos, vel=[self._move_speed, self._move_speed], acc=[self._move_speed * 2, self._move_speed * 2], ref=DR_BASE)
 
         _dsr_funcs['task_compliance_ctrl']([3000, 3000, 500, 3100, 3100, 100])
         time.sleep(0.05)
@@ -747,16 +768,16 @@ class RobotController:
             with self._lock:
                 fz = abs(self.state.tool_force[2]) if len(self.state.tool_force) > 2 else 0
             if fz >= FORCE_THRESHOLD:
-                tcp = _dsr_funcs['get_current_posx']()
-                if tcp:
-                    contact_z = float(tcp[2])
+                tcp_pos, _ = _dsr_funcs['get_current_posx']()
+                if tcp_pos:
+                    contact_z = float(tcp_pos[2])
                 break
             time.sleep(0.05)
 
         _dsr_funcs['release_force']()
         time.sleep(0.03)
         _dsr_funcs['release_compliance_ctrl']()
-        movel(start_pos, vel=[MOVE_SPEED, MOVE_SPEED], acc=[MOVE_SPEED * 2, MOVE_SPEED * 2], ref=DR_BASE)
+        movel(start_pos, vel=[self._move_speed, self._move_speed], acc=[self._move_speed * 2, self._move_speed * 2], ref=DR_BASE)
 
         if contact_z is None:
             raise RuntimeError("접촉 감지 실패 — 종이 없음 또는 Z_START가 너무 낮음")
@@ -767,7 +788,7 @@ class RobotController:
         return {'contact_z': round(contact_z, 2), 'pen_up_z': pen_up_z, 'pen_down_z': pen_down_z}
 
     # ── 그리퍼 (RG2, Modbus TCP) ────────────────────────────────
-    def gripper_open(self, force: float = 20.0):
+    def gripper_open(self, force: float = GRIPPER_DEFAULT_FORCE):
         log.info(f"그리퍼 열기 (force={force}N)")
         _gripper_move(force, GRIPPER_OPEN_WIDTH)
         time.sleep(1.5)  # 동작 완료 대기
@@ -775,7 +796,7 @@ class RobotController:
         with self._lock:
             self.state.gripper_width = w if w is not None else GRIPPER_OPEN_WIDTH
 
-    def gripper_close(self, force: float = 20.0):
+    def gripper_close(self, force: float = GRIPPER_DEFAULT_FORCE):
         log.info(f"그리퍼 닫기 (force={force}N)")
         _gripper_move(force, GRIPPER_CLOSE_WIDTH)
         time.sleep(1.5)
@@ -790,14 +811,14 @@ class RobotController:
             return
         try:
             joints = _dsr_funcs['get_current_posj']()  # [j1..j6]
-            tcp    = _dsr_funcs['get_current_posx']()   # [x,y,z,rx,ry,rz]
+            tcp_pos, _ = _dsr_funcs['get_current_posx']()  # returns (posx[6], sol)
             with self._lock:
                 if joints:
                     self.state.joints = [float(j) for j in joints]
-                if tcp:
-                    self.state.tcp_x = float(tcp[0])
-                    self.state.tcp_y = float(tcp[1])
-                    self.state.tcp_z = float(tcp[2])
+                if tcp_pos:
+                    self.state.tcp_x = float(tcp_pos[0])
+                    self.state.tcp_y = float(tcp_pos[1])
+                    self.state.tcp_z = float(tcp_pos[2])
         except Exception as e:
             log.debug(f"상태 동기화 실패: {e}")
 
@@ -828,3 +849,246 @@ class RobotController:
             if self.state.estop:  # E-STOP 중에는 외부에서 status 변경 불가
                 return
             self.state.status = status
+
+    # ── 액자 작업 시퀀스 (T4_robottask 기반) ───────────────────
+    def run_frame_task(self):
+        """액자 하판/상판 조립 + 종이 픽업 + 캘리브레이션 + 꺼내기 시퀀스."""
+        if self.state.estop:
+            raise RuntimeError("E-STOP 상태에서 실행 불가")
+        if not _dsr_available:
+            raise RuntimeError("실제 로봇 연결 필요")
+
+        movej  = _dsr_funcs['movej']
+        movel  = _dsr_funcs['movel']
+        amovel = _dsr_funcs['amovel']
+        posx   = _dsr_funcs['posx']
+        posj   = _dsr_funcs['posj']
+        task_compliance_ctrl    = _dsr_funcs['task_compliance_ctrl']
+        set_desired_force       = _dsr_funcs['set_desired_force']
+        release_force           = _dsr_funcs['release_force']
+        release_compliance_ctrl = _dsr_funcs['release_compliance_ctrl']
+        DR_FC_MOD_REL = _dsr_funcs['DR_FC_MOD_REL']
+        DR_MV_MOD_REL = _dsr_funcs['DR_MV_MOD_REL']
+
+        home_pos = posj(8.5, 5.45, 82.85, 179.96, -91.70, -171.71)
+
+        with self._lock:
+            self.state.status = "running"
+
+        def frame_lower_setup():
+            pos_lowframe_start_hover  = posj(-17.09, -4.66, 71.34, 179.97, -113.32, 72.06)
+            pos_lowframe_start_hoverx = posx(291.95, -83.31, 569.94, 170.08, -180, 79.19)
+            pos_lowframe_start        = posx(291.95, -83.31, 352.89, 170.08, -180, 79.19)
+            pos_frame_lower1          = posj(60.82, 29.56, 80.77, 120.95, -144.29, 126.52)
+            pos_frame_lower2          = posx(269.77, 295.96, 74.64, 90.91, -89.97, -0.03)
+            pos_frame_lower3          = posx(269.77, 345.96, 74.64, 90.91, -89.97, -0.03)
+            pos_frame_lower4          = posx(269.77, 345.96, 174.64, 90.91, -89.97, -0.03)
+
+            self.gripper_open()
+            time.sleep(0.1)
+            movej(home_pos, vel=30, acc=50)
+            log.info("--- [1] 액자 하판 파지 시작 ---")
+            time.sleep(0.1)
+            movej(pos_lowframe_start_hover, vel=20, acc=50)
+            time.sleep(0.1)
+            movel(pos_lowframe_start, vel=20, acc=50)
+            time.sleep(0.1)
+            self.gripper_close()
+            time.sleep(0.1)
+            movel(pos_lowframe_start_hoverx, vel=20, acc=50)
+            time.sleep(0.1)
+            movej(pos_frame_lower1, vel=20, acc=50)
+            time.sleep(0.1)
+            movel(pos_frame_lower2, vel=20, acc=50, mod=0)
+            time.sleep(0.1)
+            self.gripper_open()
+            time.sleep(0.5)
+            movel(pos_frame_lower3, vel=20, acc=50, mod=0)
+            time.sleep(0.1)
+            movel(pos_frame_lower4, vel=20, acc=50, mod=0)
+            time.sleep(0.1)
+            movej(home_pos, vel=30, acc=50)
+
+        def frame_high_setup():
+            pos_frame_highstart_hover  = posj(-24.40, -1.33, 65.83, 180.02, -115.51, 65.63)
+            pos_frame_highstart_hoverx = posx(295.35, -127.08, 583.96, 70.24, 179.95, -19.80)
+            pos_frame_highstart        = posx(295.36, -127.08, 347.73, 67.75, 179.95, -22.29)
+            pos_frame_high1            = posj(60.55, 31.09, 84.84, 127.70, -141.56, 134.69)
+            pos_frame_high2            = posx(274.49, 328.02, 81.75, 90.06, -90.00, 0.00)
+            pos_frame_high3            = posx(274.49, 378.02, 81.75, 90.06, -90.00, 0.00)
+            pos_frame_high4            = posx(274.49, 378.02, 181.75, 90.06, -90.00, 0.00)
+
+            self.gripper_open()
+            time.sleep(0.1)
+            movej(home_pos, vel=30, acc=50)
+            log.info("--- [2] 액자 상판 파지 시작 ---")
+            time.sleep(0.1)
+            movej(pos_frame_highstart_hover, vel=20, acc=50)
+            time.sleep(0.1)
+            movel(pos_frame_highstart, vel=20, acc=50)
+            time.sleep(0.1)
+            self.gripper_close()
+            time.sleep(0.1)
+            movel(pos_frame_highstart_hoverx, vel=20, acc=50)
+            time.sleep(0.1)
+            movej(pos_frame_high1, vel=20, acc=50)
+            time.sleep(0.1)
+            movel(pos_frame_high2, vel=20, acc=50, mod=0)
+            time.sleep(0.1)
+            self.gripper_open()
+            time.sleep(0.5)
+            movel(pos_frame_high3, vel=20, acc=50, mod=0)
+            time.sleep(0.1)
+            movel(pos_frame_high4, vel=20, acc=50, mod=0)
+            time.sleep(0.1)
+            movej(home_pos, vel=30, acc=50)
+
+        def calibration_frame():
+            pos_paper_calx0 = posj(-1.28, -31.68, 111.03, 180.06, -100.58, 88.75)
+            pos_paper_calx1 = posj(-1.25, -31.81, 131.84, 180.07, -79.95, 88.74)
+            pos_paper_caly0 = posx(277.05, 158.74, 390.10, 68.97, 179.95, -21.07)
+            pos_paper_caly1 = posx(277.05, 158.74, 290.10, 68.97, 179.95, -21.07)
+
+            log.info("--- [Cal] Y축 캘리브레이션 ---")
+            self.gripper_close()
+            time.sleep(0.1)
+            movel(pos_paper_caly0, vel=50, acc=50)
+            time.sleep(0.1)
+            movel(pos_paper_caly1, vel=50, acc=50)
+            time.sleep(0.5)
+            task_compliance_ctrl(stx=[100, 3000, 3000, 100, 100, 100])
+            time.sleep(0.5)
+            set_desired_force(fd=[0, -15, 0, 0, 0, 0], dir=[0, 1, 0, 0, 0, 0], mod=DR_FC_MOD_REL)
+            time.sleep(13)
+            release_force()
+            time.sleep(0.5)
+            release_compliance_ctrl()
+            time.sleep(0.1)
+            movel(pos_paper_caly1, vel=50, acc=50)
+            time.sleep(0.1)
+            movel(pos_paper_caly0, vel=50, acc=50)
+
+            log.info("--- [Cal] X축 캘리브레이션 ---")
+            self.gripper_close()
+            time.sleep(0.1)
+            movej(pos_paper_calx0, vel=50, acc=50)
+            time.sleep(0.1)
+            movej(pos_paper_calx1, vel=50, acc=50)
+            time.sleep(0.5)
+            task_compliance_ctrl(stx=[100, 3000, 3000, 100, 100, 100])
+            time.sleep(0.5)
+            set_desired_force(fd=[15, 0, 0, 0, 0, 0], dir=[1, 0, 0, 0, 0, 0], mod=DR_FC_MOD_REL)
+            time.sleep(7.5)
+            release_force()
+            time.sleep(0.5)
+            release_compliance_ctrl()
+            time.sleep(0.1)
+            movej(pos_paper_calx1, vel=50, acc=50)
+            time.sleep(0.1)
+            movej(pos_paper_calx0, vel=50, acc=50)
+
+        def slide_and_pinch_paper():
+            pos_paper_center        = posx(547.03, 75.97, 334.62, 9.86, 180.00, 98.32)
+            pos_cliff_edge          = posx(547.03, 120.97, 334.63, 179.99, 180.00, -91.36)
+            pos_frame_paper_prepare = posx(288.95, 239.42, 444.60, 91, -135.9, 179)
+            pos_frame_paper0        = posx(288.96, 179.73, 334.59, 91.03, -135.31, 178.80)
+            pos_frame_paper1        = posx(288.96, 179.73, 444.59, 91.03, -135.31, 178.80)
+            pinch_ready_pos0        = posx(554.45, 403.09, 193.32, 91.36, -90.00, 180.00)
+            pinch_ready_pos1        = posx(554.45, 403.11, 103.32, 91.36, -90.00, 180.00)
+            pinch_ready_pos2        = posx(554.45, 373.14, 103.32, 91.36, -90.00, -180.00)
+            hover_pos               = posx(547.03, 75.97, 364.62, 9.86, 180.00, 98.32)  # Z+30
+            cliff_up                = posx(547.03, 120.97, 434.63, 179.99, 180.00, -91.36)
+
+            log.info("--- [3] 종이 슬라이딩 시작 ---")
+            self.gripper_open()
+            time.sleep(0.1)
+            movej(home_pos, vel=30, acc=50)
+            time.sleep(0.1)
+            movel(hover_pos, vel=100, acc=100, mod=0)
+            time.sleep(0.1)
+            self.gripper_close()
+            time.sleep(0.1)
+            movel(pos_paper_center, vel=30, acc=50, mod=0)
+
+            task_compliance_ctrl(stx=[500, 500, 500, 100, 100, 100])
+            time.sleep(0.5)
+            set_desired_force(fd=[0, 0, -3, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
+            time.sleep(2)
+            amovel(pos_cliff_edge, vel=30, acc=50, mod=0, ref=0)
+            time.sleep(3)
+            release_force()
+            time.sleep(0.5)
+            release_compliance_ctrl()
+            time.sleep(0.1)
+            movel(cliff_up, vel=100, acc=100)
+
+            log.info("--- [3] 꼬집기(Pinch) 픽업 ---")
+            self.gripper_open()
+            movel(pinch_ready_pos0, vel=50, acc=50)
+            time.sleep(0.1)
+            movel(pinch_ready_pos1, vel=50, acc=50)
+            time.sleep(0.1)
+            movel(pinch_ready_pos2, vel=50, acc=50)
+            time.sleep(0.1)
+            self.gripper_close()
+            time.sleep(0.1)
+            movel(pinch_ready_pos0, vel=50, acc=50)
+            time.sleep(0.5)
+
+            movel(pos_frame_paper_prepare, vel=30, acc=50)
+            log.info("--- [3] 액자로 이동 ---")
+            movel(pos_frame_paper0, vel=50, acc=50)
+            time.sleep(0.1)
+            self.gripper_open()
+            time.sleep(2)
+            pos_paper_release = posx(0, 0, 0, 90, -40, -90)
+            amovel(pos_frame_paper1, vel=[30.0, 30.0], acc=[20.0, 20.0], mod=0, ref=0)
+            amovel(pos_paper_release, vel=[20.0, 20.0], acc=[10.0, 10.0], mod=DR_MV_MOD_REL, ref=0)
+            time.sleep(3)
+            movej(home_pos, vel=30, acc=50)
+            log.info("--- 액자 안착 완료 ---")
+
+        def frameout():
+            pos_frameout0        = posx(281.78, 288.83, 80.12, 90, -90, 0)
+            pos_frameout1        = posx(281.78, 340.83, 80.12, 90, -90, 0)
+            pos_frameout1_hover  = posx(281.78, 340.83, 300.12, 90, -90, 0)
+            pos_framefinal       = posx(420, 51.77, 349.94, 7.48, 179.48, -173.96)
+            pos_framefinal_hover = posx(420, 51.77, 549.94, 7.48, 179.48, -173.96)
+
+            log.info("--- [5] 액자 꺼내기 ---")
+            movej(home_pos, vel=30, acc=50)
+            time.sleep(0.1)
+            self.gripper_open()
+            time.sleep(0.1)
+            movel(pos_frameout1_hover, vel=30, acc=50)
+            time.sleep(0.1)
+            movel(pos_frameout1, vel=30, acc=50)
+            time.sleep(0.1)
+            movel(pos_frameout0, vel=30, acc=50)
+            time.sleep(0.1)
+            self.gripper_close()
+            time.sleep(0.1)
+            movel(pos_frameout1_hover, vel=30, acc=50)
+            time.sleep(0.1)
+            movel(pos_framefinal_hover, vel=30, acc=50)
+            time.sleep(0.1)
+            movel(pos_framefinal, vel=30, acc=50)
+            time.sleep(0.1)
+            self.gripper_open()
+            time.sleep(0.1)
+            movel(pos_frameout1_hover, vel=30, acc=50)
+
+        try:
+            frame_lower_setup()
+            slide_and_pinch_paper()
+            calibration_frame()
+            frame_high_setup()
+            calibration_frame()
+            frameout()
+            log.info("액자 작업 시퀀스 완료")
+        except Exception as e:
+            log.error(f"액자 작업 실패: {e}")
+            raise
+        finally:
+            with self._lock:
+                self.state.status = "idle"

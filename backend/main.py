@@ -22,7 +22,7 @@ from std_msgs.msg import Float64MultiArray
 from dsr_msgs2.srv import ServoOff, SetRobotControl, GetRobotState
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-from config import WS_HOST, WS_PORT, STATUS_INTERVAL_SEC, DEFAULT_CALIBRATION
+from config import WS_HOST, WS_PORT, STATUS_INTERVAL_SEC
 from database import Database
 
 logging.basicConfig(
@@ -54,7 +54,7 @@ class BridgeNode(Node):
         self._svc = {
             name: self.create_client(Trigger, f'/robot_art/{name}')
             for name in ('start', 'stop', 'home',
-                         'gripper_open', 'gripper_close', 'calibrate_z')
+                         'gripper_open', 'gripper_close', 'calibrate_z', 'frame_task')
         }
 
         # DSR 직접 서비스 클라이언트 (estop/release/연결확인)
@@ -196,7 +196,7 @@ async def _status_broadcast_loop():
 
         dsr_connected = _bridge._dsr_connected if _bridge else False
 
-        # robot 상태 조립 — DSR 직접 값 우선
+        # robot 상태 조립 — robot_art_node가 SDK 직접 폴링한 값 사용
         robot = _last_status.get("robot", {}) if _last_status else {}
         if _bridge:
             robot = {
@@ -204,10 +204,6 @@ async def _status_broadcast_loop():
                 "connected"    : dsr_connected,
                 "powered"      : dsr_connected,
                 "ros2"         : dsr_connected,
-                "joints"       : _bridge._joints,
-                "tcpX"         : _bridge._tcp[0],
-                "tcpY"         : _bridge._tcp[1],
-                "tcpZ"         : _bridge._tcp[2],
             }
 
         status_data = {
@@ -310,6 +306,11 @@ async def handle_command(ws: WebSocket, msg: dict):
         result = await asyncio.to_thread(_bridge.call_service, 'gripper_close')
         await ws.send_text(json.dumps({"type": "log", "level": "INFO", "message": result['message']}))
 
+    elif cmd == "frame_task":
+        result = await asyncio.to_thread(_bridge.call_service, 'frame_task', 5.0)
+        level = "INFO" if result['success'] else "ERROR"
+        await broadcast({"type": "log", "level": level, "message": result['message']})
+
     elif cmd == "calibrate_z":
         result = await asyncio.to_thread(_bridge.call_service, 'calibrate_z', 10.0)
         if result['success']:
@@ -335,7 +336,7 @@ async def handle_command(ws: WebSocket, msg: dict):
         await ws.send_text(json.dumps({"type": "logs", "logs": logs}))
 
     elif cmd == "get_calibration":
-        calib = db.get_active_calibration() or DEFAULT_CALIBRATION
+        calib = db.get_active_calibration() or {}
         await ws.send_text(json.dumps({"type": "calibration", "data": calib}))
 
     elif cmd == "save_calibration":

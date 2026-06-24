@@ -12,14 +12,10 @@ interface Props {
   calibratedZ?: CalibrateZResult | null;
 }
 
-const DEFAULT_CALIB: CalibrationData = {
-  origin_x:         461.0,   // S자 좌상단
-  origin_y:          33.0,
-  origin_z:         436.33,
-  pen_down_z:       435.33,
-  pixel_spacing_mm:   2.0,
-  center_x:         356.0,   // 동심원 중심
-  center_y:         -41.0,
+const EMPTY_CALIB: CalibrationData = {
+  origin_x: 0, origin_y: 0, origin_z: 0,
+  pen_down_z: 0, pixel_spacing_mm: 2.0,
+  center_x: 0, center_y: 0,
 };
 
 function Row({ label, value, unit }: { label: string; value: string | number; unit?: string }) {
@@ -32,11 +28,16 @@ function Row({ label, value, unit }: { label: string; value: string | number; un
 }
 
 export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCalibration, savedCalib, onCalibrateZ, calibratedZ }: Props) {
-  const [calib, setCalib]           = useState<CalibrationData>(savedCalib ?? DEFAULT_CALIB);
+  const [calib, setCalib]           = useState<CalibrationData>(savedCalib ?? EMPTY_CALIB);
   const [saved, setSaved]           = useState(false);
   const [originSaved, setOriginSaved] = useState(false);
   const [zMeasuring, setZMeasuring] = useState(false);
   const [zMeasured,  setZMeasured]  = useState(false);
+
+  // 서버에서 캘리브레이션이 로드되면 UI에 반영
+  useEffect(() => {
+    if (savedCalib) setCalib(savedCalib);
+  }, [savedCalib]);
 
   // 자동 Z 측정 결과가 오면 캘리브레이션 값에 반영
   useEffect(() => {
@@ -165,7 +166,7 @@ export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCa
         <button className="btn-primary" style={{ padding: '10px 32px' }} onClick={saveCalib}>
           {saved ? '✓ 저장됨' : '캘리브레이션 저장'}
         </button>
-        <button className="btn-ghost" onClick={() => setCalib(savedCalib ?? DEFAULT_CALIB)}>
+        <button className="btn-ghost" onClick={() => setCalib(savedCalib ?? EMPTY_CALIB)}>
           초기화
         </button>
         <span style={{ fontSize: 12, color: 'var(--text2)' }}>* 저장 즉시 그리기에 반영됩니다</span>

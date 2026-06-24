@@ -8,8 +8,6 @@ interface Props {
   addLog: (msg: string) => void;
 }
 
-const PAPER_SIZES = ['A4', 'A3', 'custom'] as const;
-
 export default function SettingsPage({ settings, setSettings, addLog }: Props) {
   const [form, setForm] = useState<Settings>({ ...settings });
   const [saved, setSaved] = useState(false);
@@ -42,26 +40,29 @@ export default function SettingsPage({ settings, setSettings, addLog }: Props) {
         {/* 이미지 설정 */}
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--accent)', marginBottom: 16 }}>이미지 설정</div>
+          <div style={{ marginBottom: 12, padding: '8px 12px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
+            용지: A5 (148×210mm) 고정
+          </div>
           <div>
             <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>해상도</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
-              {RESOLUTIONS.filter(r => r.key !== 'custom').map(r => (
-                <button type="button" key={r.key}
-                  onClick={() => setForm(p => ({ ...p, resolutionKey: r.key }))}
-                  style={{
-                    padding: '10px 0', borderRadius: 6, border: '1px solid',
-                    borderColor: form.resolutionKey === r.key ? 'var(--accent)' : 'var(--border)',
-                    background: form.resolutionKey === r.key ? 'rgba(0,102,255,0.15)' : 'var(--panel2)',
-                    color: form.resolutionKey === r.key ? 'var(--accent)' : 'var(--text2)',
-                    cursor: 'pointer', fontSize: 13, fontWeight: form.resolutionKey === r.key ? 700 : 400,
-                  }}>
-                  {r.key === '50'  && <><div style={{ fontSize: 15, fontWeight: 700 }}>50×50</div><div style={{ fontSize: 10 }}>2,500px · 빠름</div></>}
-                  {r.key === '80'  && <><div style={{ fontSize: 15, fontWeight: 700 }}>80×80</div><div style={{ fontSize: 10 }}>6,400px</div></>}
-                  {r.key === '100' && <><div style={{ fontSize: 15, fontWeight: 700 }}>100×100</div><div style={{ fontSize: 10 }}>10,000px · 기본</div></>}
-                  {r.key === '150' && <><div style={{ fontSize: 15, fontWeight: 700 }}>150×150</div><div style={{ fontSize: 10 }}>22,500px</div></>}
-                  {r.key === '200' && <><div style={{ fontSize: 15, fontWeight: 700 }}>200×200</div><div style={{ fontSize: 10 }}>40,000px</div></>}
-                </button>
-              ))}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
+              {RESOLUTIONS.map(r => {
+                const [main, sub] = r.label.split('·');
+                return (
+                  <button type="button" key={r.key}
+                    onClick={() => setForm(p => ({ ...p, resolutionKey: r.key }))}
+                    style={{
+                      padding: '10px 12px', borderRadius: 6, border: '1px solid', textAlign: 'left',
+                      borderColor: form.resolutionKey === r.key ? 'var(--accent)' : 'var(--border)',
+                      background: form.resolutionKey === r.key ? 'rgba(0,102,255,0.15)' : 'var(--panel2)',
+                      color: form.resolutionKey === r.key ? 'var(--accent)' : 'var(--text2)',
+                      cursor: 'pointer', fontWeight: form.resolutionKey === r.key ? 700 : 400,
+                    }}>
+                    <div style={{ fontSize: 13 }}>{main.trim()}</div>
+                    {sub && <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>{sub.trim()}</div>}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -92,57 +93,21 @@ export default function SettingsPage({ settings, setSettings, addLog }: Props) {
           </div>
         </div>
 
-        {/* 출력 설정 */}
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--yellow)', marginBottom: 16 }}>출력 설정</div>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>용지 크기</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {PAPER_SIZES.map(s => (
-                <button type="button" key={s}
-                  onClick={() => setForm(p => ({ ...p, paperSize: s }))}
-                  style={{
-                    padding: '8px 20px', borderRadius: 6, border: '1px solid',
-                    borderColor: form.paperSize === s ? 'var(--yellow)' : 'var(--border)',
-                    background: form.paperSize === s ? 'rgba(255,234,0,0.12)' : 'var(--panel2)',
-                    color: form.paperSize === s ? 'var(--yellow)' : 'var(--text2)',
-                    cursor: 'pointer', fontWeight: form.paperSize === s ? 700 : 400, fontSize: 13,
-                  }}>
-                  {s === 'A4' ? 'A4 (210×297mm)' : s === 'A3' ? 'A3 (297×420mm)' : '사용자 정의'}
-                </button>
-              ))}
-            </div>
-          </div>
-          {form.paperSize === 'custom' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>너비 (mm)</div>
-                {n('customPaperW', 50, 600)}
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>높이 (mm)</div>
-                {n('customPaperH', 50, 600)}
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* 로봇 설정 */}
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--green)', marginBottom: 16 }}>로봇 설정</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
             <div>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>최대 TCP 속도 (mm/s) <span style={{ color: 'var(--border)' }}>1~2000</span></div>
-              {n('maxSpeed', 1, 2000)}
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>최대 가속도 (mm/s²) <span style={{ color: 'var(--border)' }}>1~5000</span></div>
-              {n('maxAccel', 1, 5000)}
+              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>이동 속도 (mm/s) <span style={{ color: 'var(--border)' }}>10~500</span></div>
+              {n('maxSpeed', 10, 500)}
             </div>
             <div>
               <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>로그 보관 (일) <span style={{ color: 'var(--border)' }}>1~365</span></div>
               {n('logRetention', 1, 365)}
             </div>
+          </div>
+          <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
+            픽셀 간 이동 속도 · 가속도는 속도의 ×2 자동 적용
           </div>
         </div>
 

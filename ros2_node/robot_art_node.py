@@ -82,6 +82,7 @@ class RobotArtNode(Node):
         self.create_service(Trigger, '/robot_art/gripper_open',   self._svc_gripper_open)
         self.create_service(Trigger, '/robot_art/gripper_close',  self._svc_gripper_close)
         self.create_service(Trigger, '/robot_art/calibrate_z',    self._svc_calibrate_z)
+        self.create_service(Trigger, '/robot_art/frame_task',     self._svc_frame_task)
 
         # ── 상태 주기 발행 ──────────────────────────────────────
         self.create_timer(STATUS_INTERVAL_SEC, self._pub_status)
@@ -160,6 +161,16 @@ class RobotArtNode(Node):
         threading.Thread(target=self.robot.gripper_close, daemon=True).start()
         res.success = True
         res.message = '그리퍼 닫기'
+        return res
+
+    def _svc_frame_task(self, req, res):
+        if self.engine.is_running():
+            res.success = False
+            res.message = '그리기 중에는 액자 작업 불가'
+            return res
+        threading.Thread(target=self.robot.run_frame_task, daemon=True).start()
+        res.success = True
+        res.message = '액자 작업 시작'
         return res
 
     def _svc_calibrate_z(self, req, res):

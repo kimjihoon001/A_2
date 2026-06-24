@@ -156,8 +156,7 @@ export default function SafetyPage({ robotState, alarms, onEstop, onResetEstop, 
           <div style={{ marginTop: 16 }}>
             <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>로봇 제한값</div>
             {[
-              { l: '최대 TCP 속도', v: `${settings.maxSpeed} mm/s`,  c: 'var(--accent)' },
-              { l: '최대 가속도',   v: `${settings.maxAccel} mm/s²`, c: 'var(--accent2)' },
+              { l: '이동 속도', v: `${settings.maxSpeed} mm/s`, c: 'var(--accent)' },
             ].map((z, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
                 <span style={{ color: 'var(--text2)', fontSize: 12 }}>{z.l}</span>

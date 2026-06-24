@@ -13,13 +13,9 @@ export const DEFAULT_SETTINGS: Settings = {
   minForce:        2,
   maxForce:        8,
   maxAllowedForce: 10,
-  dotHoldMs:      200,
-  resolutionKey: '100',
-  paperSize:     'A4',
-  customPaperW:  210,
-  customPaperH:  297,
-  maxSpeed:      500,
-  maxAccel:     1000,
+  dotHoldMs:      150,
+  resolutionKey: 'A5_M',
+  maxSpeed:      200,
   logRetention:   30,
 };
 
@@ -88,8 +84,6 @@ export const DEFAULT_ART_SETTINGS: ArtSettings = {
   penForceMin:   3,
   penForceMax:  10,
   dryRun:       false,
-  originX:      356.0,
-  originY:      -41.0,
 };
 
 export const INITIAL_DRAWING_STATE: DrawingState = {

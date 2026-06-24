@@ -29,11 +29,7 @@ export interface Settings {
   maxAllowedForce: number;
   dotHoldMs: number;
   resolutionKey: string;
-  paperSize: string;
-  customPaperW: number;
-  customPaperH: number;
   maxSpeed: number;
-  maxAccel: number;
   logRetention: number;
 }
 
@@ -126,8 +122,6 @@ export interface ArtSettings {
   penForceMin: number;
   penForceMax: number;
   dryRun: boolean;
-  originX: number;
-  originY: number;
   drawMode?: 'snake' | 'contour';
 }
 

@@ -83,7 +83,7 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
     const img = new Image();
     img.onload = () => {
       if (cancelled) return;
-      const { resWidth, resHeight, frameWidth, frameHeight, brightness, contrast, rotation, flipH, flipV } = artSettingsRef.current;
+      const { resWidth, resHeight, brightness, contrast, rotation, flipH, flipV } = artSettingsRef.current;
 
       function processAtRes(w: number, h: number): { pixels: PixelPoint[]; imgData: ImageData } {
         const c = document.createElement('canvas');

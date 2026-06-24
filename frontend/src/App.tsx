@@ -28,12 +28,11 @@ type AppMode = 'customer' | 'login' | 'admin';
 let idSeq = 0;
 const uid   = () => ++idSeq;
 function nowStr() { return new Date().toLocaleTimeString('ko-KR'); }
-function randInt(a: number, b: number) { return Math.floor(Math.random() * (b - a + 1)) + a; }
 
 const INITIAL_ROBOT: RobotState = {
-  status: 'idle', joints: [0, -30, 60, 0, 45, 0],
+  status: 'idle', joints: [0, 0, 0, 0, 0, 0],
   speed: 0, penForce: 0,
-  tcpX: 423, tcpY: 12, tcpZ: 315,
+  tcpX: 0, tcpY: 0, tcpZ: 0,
   ros2: false,
 };
 
@@ -56,15 +55,12 @@ export default function App() {
   const [logs, setLogs] = useState<LogEntry[]>([
     { id: uid(), time: '00:00:00', msg: '시스템 초기화 완료' },
   ]);
-  const [history, setHistory] = useState<HistoryPoint[]>(
-    Array.from({ length: 20 }, (_, i) => ({ t: `${i}s`, speed: 0, force: 0 }))
+  const [history, setHistory] = useState<HistoryPoint[]>([]
   );
 
   const settingsRef    = useRef(settings);
   settingsRef.current  = settings;
   const historyTickRef = useRef(0);
-  const drawTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
-  const drawPixelsRef  = useRef<PixelPoint[]>([]);
   const penForceRef    = useRef({ min: 10, max: 50 });
   const logsRef        = useRef<(msg: string) => void>(() => {});
   const alarmsRef      = useRef<(level: Alarm['level'], msg: string) => void>(() => {});
@@ -159,6 +155,29 @@ export default function App() {
       setCalibratedZ(data);
       addLog(`[Z 자동측정] 접촉=${data.contact_z}mm → pen_up=${data.pen_up_z}, pen_down=${data.pen_down_z} (자동 저장됨)`);
     },
+    onCalibrationLoad: (data) => {
+      setCalibration(data as CalibrationData);
+    },
+    onSettingsLoad: (data) => {
+      const d = data as Record<string, { value: string }>;
+      const parse = (key: string, fallback: number) => {
+        const v = parseFloat(d[key]?.value ?? '');
+        return isNaN(v) ? fallback : v;
+      };
+      const hmi = d['hmi_settings']?.value;
+      if (hmi) {
+        try { setSettings(s => ({ ...s, ...JSON.parse(hmi) })); } catch { /* ignore */ }
+      } else {
+        setSettings(s => ({
+          ...s,
+          maxSpeed:     parse('move_speed',          s.maxSpeed),
+          minForce:     parse('pen_force_min',        s.minForce),
+          maxForce:     parse('pen_force_max',        s.maxForce),
+          dotHoldMs:    parse('dot_hold_ms',          s.dotHoldMs),
+          logRetention: parse('log_retention_days',   s.logRetention),
+        }));
+      }
+    },
   });
 
   const serverConnected = server.connected;
@@ -172,7 +191,6 @@ export default function App() {
   // ── E-STOP ──────────────────────────────────────────────────
   function handleEstop() {
     if (serverConnected) server.estop();
-    else                 stopDrawingNow('failed', '비상정지로 작업 중단');
     setRobotState(s => ({ ...s, status: 'estop', speed: 0 }));
     addAlarm('error', '비상정지 활성화됨');
     addLog('E-STOP 활성화');
@@ -188,16 +206,7 @@ export default function App() {
 
   // ── 원점 복귀 ────────────────────────────────────────────────
   function handleGoHome() {
-    if (serverConnected) {
-      server.home();
-    } else {
-      setRobotState(s => ({ ...s, status: 'homing', speed: 0 }));
-      addLog('원점 복귀 중...');
-      setTimeout(() => {
-        setRobotState(s => ({ ...s, status: 'idle', joints: [0, -30, 60, 0, 45, 0], tcpX: 423, tcpY: 12, tcpZ: 315 }));
-        addLog('원점 복귀 완료');
-      }, 2000);
-    }
+    if (serverConnected) server.home();
   }
 
   // ── 일시정지 / 재개 ─────────────────────────────────────────
@@ -222,8 +231,7 @@ export default function App() {
       ? `${artSettings.frameWidth}×${artSettings.frameHeight}mm`
       : artSettings.frameSizeKey;
 
-    penForceRef.current   = { min: artSettings.penForceMin, max: artSettings.penForceMax };
-    drawPixelsRef.current = pixels;
+    penForceRef.current = { min: artSettings.penForceMin, max: artSettings.penForceMax };
 
     setDrawingState(s => ({
       ...s,
@@ -236,113 +244,21 @@ export default function App() {
       dryRun: artSettings.dryRun, startTime: Date.now(),
     }));
     setRobotState(s => ({ ...s, status: 'running' }));
-    addLog(`그리기 시작: ${imageName} (${pixels.length.toLocaleString()}픽셀)${artSettings.dryRun ? ' [건식]' : ''}${serverConnected ? ' → 서버' : ' → 시뮬'}`);
+    addLog(`그리기 시작: ${imageName} (${pixels.length.toLocaleString()}픽셀)${artSettings.dryRun ? ' [건식]' : ''}`);
     addAlarm('info', `그리기 시작: ${imageName}`);
 
     if (serverConnected) {
       server.startDrawing(pixels, artSettings, imageName);
-    } else {
-      _runSimulation(pixels, artSettings);
     }
   }
 
-  function _runSimulation(pixels: PixelPoint[], _artSettings: ArtSettings) {
-    if (drawTimerRef.current) clearInterval(drawTimerRef.current);
-    const stepPx = 50;
-    drawTimerRef.current = setInterval(() => {
-      setDrawingState(prev => {
-        if (prev.status !== 'running') {
-          clearInterval(drawTimerRef.current!); drawTimerRef.current = null;
-          return prev;
-        }
-        const next = prev.currentPixel + stepPx;
-        const px   = pixels[Math.min(next, pixels.length - 1)];
-        const { min, max } = penForceRef.current;
-        const targetF = max - (px.gray / 255) * (max - min);
 
-        if (next >= prev.totalPixels) {
-          clearInterval(drawTimerRef.current!); drawTimerRef.current = null;
-          const elapsed = ((Date.now() - prev.startTime) / 1000).toFixed(1);
-          const job: DrawingJob = {
-            id: uid(), startTime: new Date(prev.startTime).toLocaleTimeString('ko-KR'),
-            endTime: nowStr(), imageName: prev.imageName, frameSize: prev.frameSize,
-            paperType: prev.paperType, resLabel: prev.resLabel,
-            totalPixels: prev.totalPixels, failPixels: prev.failPixels,
-            status: 'success', dryRun: prev.dryRun, duration: `${elapsed}s`,
-          };
-          logsRef.current(`그리기 완료: ${prev.imageName} (${elapsed}s)`);
-          alarmsRef.current('info', `그리기 완료: ${prev.imageName}`);
-          setRobotState(s => ({ ...s, status: 'idle', speed: 0, penForce: 0 }));
-          return { ...prev, status: 'success', currentPixel: prev.totalPixels,
-            message: `완료! ${prev.totalPixels.toLocaleString()}픽셀 (${elapsed}s)`,
-            successCount: prev.successCount + 1, history: [job, ...prev.history] };
-        }
-
-        const mmPerPixelX = _artSettings.frameWidth  / _artSettings.resWidth;
-        const mmPerPixelY = _artSettings.frameHeight / _artSettings.resHeight;
-        const tcpX = _artSettings.originX + px.x * mmPerPixelX;
-        const tcpY = _artSettings.originY + px.y * mmPerPixelY;
-
-        setRobotState(s => s.status === 'running' ? {
-          ...s, speed: randInt(80, 250),
-          tcpX, tcpY,
-          penForce: targetF + (Math.random() - 0.5) * 3,
-          joints: s.joints.map((j, i) => parseFloat((j + (Math.random() - 0.5) * (i < 2 ? 2 : 0.3)).toFixed(1))),
-        } : s);
-
-        return {
-          ...prev, currentPixel: next,
-          currentX: tcpX, currentY: tcpY,
-          currentGray: px.gray, targetForce: parseFloat(targetF.toFixed(1)),
-          currentPenForce: targetF,
-          message: `그리는 중... ${next.toLocaleString()} / ${prev.totalPixels.toLocaleString()} 픽셀`,
-        };
-      });
-    }, 100);
-  }
-
-  function stopDrawingNow(finalStatus: DrawingState['status'], msg: string) {
-    if (drawTimerRef.current) { clearInterval(drawTimerRef.current); drawTimerRef.current = null; }
-    setDrawingState(prev => {
-      if (prev.status !== 'running' && prev.status !== 'paused') return prev;
-      const elapsed = ((Date.now() - prev.startTime) / 1000).toFixed(1);
-      const job: DrawingJob = {
-        id: uid(), startTime: new Date(prev.startTime).toLocaleTimeString('ko-KR'),
-        endTime: nowStr(), imageName: prev.imageName, frameSize: prev.frameSize,
-        paperType: prev.paperType, resLabel: prev.resLabel,
-        totalPixels: prev.totalPixels, failPixels: prev.failPixels,
-        status: finalStatus, dryRun: prev.dryRun, duration: `${elapsed}s`,
-      };
-      return { ...prev, status: finalStatus, message: msg,
-        failCount: finalStatus === 'failed' ? prev.failCount + 1 : prev.failCount,
-        history: [job, ...prev.history] };
-    });
-    setRobotState(s => ({ ...s, status: 'idle', speed: 0, penForce: 0 }));
-  }
 
   function handleCancelDrawing() {
     if (serverConnected) server.stop();
-    else                 stopDrawingNow('cancelled', '사용자가 작업을 취소했습니다.');
     addLog('그리기 취소됨');
   }
 
-  // ── 아이들 시뮬레이션 (서버 없을 때만) ─────────────────────
-  useEffect(() => {
-    if (mode !== 'admin' || serverConnected) return;
-    const timer = setInterval(() => {
-      setRobotState(prev => {
-        if (prev.status === 'estop' || prev.status === 'running' || prev.status === 'homing') return prev;
-        return {
-          ...prev,
-          joints: prev.joints.map(j => parseFloat((j + (Math.random() - 0.5) * 0.5).toFixed(1))),
-          tcpX:   parseFloat((prev.tcpX + (Math.random() - 0.5) * 1.5).toFixed(1)),
-          tcpY:   parseFloat((prev.tcpY + (Math.random() - 0.5) * 1.5).toFixed(1)),
-          tcpZ:   parseFloat((prev.tcpZ + (Math.random() - 0.5) * 0.5).toFixed(1)),
-        };
-      });
-    }, 1500);
-    return () => clearInterval(timer);
-  }, [mode, serverConnected]);
 
   // ── 렌더 분기 ─────────────────────────────────────────────────
   if (mode === 'customer') {
@@ -383,12 +299,12 @@ export default function App() {
         robotState={robotState}
         onStop={() => {
           if (serverConnected) server.stop();
-          else stopDrawingNow('cancelled', '관리자가 작업을 중단했습니다.');
           addLog('[관리자] 그리기 강제 정지');
         }}
         onPause={handlePause}
         onResume={handleResume}
         onGoHome={handleGoHome}
+        onFrameTask={() => { if (serverConnected) server.frameTask(); addLog('[관리자] 액자 작업 시작'); }}
         addLog={addLog}
       />
     ),
@@ -429,7 +345,15 @@ export default function App() {
       />
     ),
     settings: (
-      <SettingsPage settings={settings} setSettings={setSettings} addLog={addLog} />
+      <SettingsPage settings={settings} setSettings={(s) => {
+        setSettings(s);
+        if (serverConnected) server.saveSettings({
+          move_speed:         String(s.maxSpeed),
+          dot_hold_ms:        String(s.dotHoldMs),
+          log_retention_days: String(s.logRetention),
+          hmi_settings:       JSON.stringify(s),
+        });
+      }} addLog={addLog} />
     ),
     logs: (
       <LogsPage logs={logs} jobHistory={drawingState.history} />

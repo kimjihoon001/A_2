@@ -79,12 +79,23 @@ class Database:
                 );
             """)
         self._seed_settings()
+        self._seed_calibration()
+
+    # 드로잉 작업 기준 안전 한계값 (M0609 스펙 최대 1500mm/s 이지만 드로잉용으로 제한)
+    _LIMITS: dict = {
+        'move_speed':            (10,   500),
+        'dot_hold_ms':           (50,  2000),
+        'log_retention_days':    (1,    365),
+        'skip_threshold':        (0,    255),
+        'gripper_default_force': (1,    120),
+    }
 
     def _seed_settings(self):
         """기본 설정값이 없으면 삽입"""
         defaults = [
-            ("move_speed",           "200",  "픽셀 간 이동 속도 (mm/s)"),
-            ("draw_speed",           "50",   "펜 내릴 때 속도 (mm/s)"),
+            ("move_speed",           "200",  "픽셀 간 이동 속도 (mm/s) · 한계 10~500"),
+            ("dot_hold_ms",          "150",  "펜 접촉 유지 시간 (ms) · 한계 50~2000"),
+            ("log_retention_days",   "30",   "로그 보관 기간 (일) · 한계 1~365"),
             ("skip_threshold",       "245",  "스킵할 그레이값 상한 (0~255)"),
             ("gripper_default_force","20",   "그리퍼 기본 파지력 (N)"),
             ("robot_ip",             "192.168.1.100", "M0609 IP 주소"),
@@ -94,6 +105,19 @@ class Database:
                 "INSERT OR IGNORE INTO settings (key, value, description) VALUES (?,?,?)",
                 defaults
             )
+
+    def _seed_calibration(self):
+        with self._conn() as conn:
+            exists = conn.execute("SELECT 1 FROM calibration WHERE is_active=1").fetchone()
+            if exists:
+                return
+            conn.execute("""
+                INSERT INTO calibration
+                    (name, origin_x, origin_y, origin_z,
+                     pen_down_z, pixel_spacing_mm,
+                     canvas_width_mm, canvas_height_mm, is_active)
+                VALUES ('default', 653.5, 187.19, 360.58, 359.58, 2.0, 210.0, 148.0, 1)
+            """)
 
     # ── Jobs ────────────────────────────────────────────────────
     def create_job(self, data: dict) -> int:
@@ -213,6 +237,9 @@ class Database:
         return {r["key"]: {"value": r["value"], "description": r["description"]} for r in rows}
 
     def set_setting(self, key: str, value: Any):
+        if key in self._LIMITS:
+            lo, hi = self._LIMITS[key]
+            value = max(lo, min(hi, float(value)))
         with self._conn() as conn:
             conn.execute("""
                 INSERT INTO settings (key, value, updated_at)

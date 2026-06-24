@@ -6,9 +6,7 @@ import time
 import threading
 import logging
 from typing import Callable
-from config import (MOVE_SPEED, DRAW_SPEED,
-                    DEFAULT_CALIBRATION,
-                    READY_JOINTS, READY_VEL, READY_ACC)
+from config import (READY_JOINTS, READY_VEL, READY_ACC)
 from robot_controller import RobotController
 from database import Database
 
@@ -45,16 +43,15 @@ def _build_contour_segments(pixels: list[dict], calibration: dict,
     for p in pixels:
         grid[p["y"]][p["x"]] = p["gray"]
 
-    z_up = float(calibration.get("origin_z") or 436.88)
-    z_dn = float(calibration.get("pen_down_z") or 435.88)
-
-    ox = float(calibration.get("origin_x") or 356.0)
-    oy = float(calibration.get("origin_y") or -41.0)
+    z_up = float(calibration["origin_z"])
+    z_dn = float(calibration["pen_down_z"])
+    ox   = float(calibration["origin_x"])
+    oy   = float(calibration["origin_y"])
     if settings and settings.get("frameWidth") and settings.get("resWidth"):
         mm_x = float(settings["frameWidth"])  / float(settings["resWidth"])
         mm_y = float(settings["frameHeight"]) / float(settings["resHeight"])
     else:
-        mm_x = float(calibration.get("pixel_spacing_mm") or 2.0)
+        mm_x = float(calibration["pixel_spacing_mm"])
         mm_y = mm_x
 
     cx_img = width  / 2.0
@@ -168,17 +165,15 @@ def _build_path(pixels: list[dict], calibration: dict,
 
     grid: dict[tuple, int] = {(p["x"], p["y"]): p["gray"] for p in pixels}
 
-    z_up = float(calibration.get("origin_z") or 436.88)
-    z_dn = float(calibration.get("pen_down_z") or 435.88)
-
-    # S자 모드: origin_x/y = 종이 좌상단 절대좌표
-    ox = float(calibration.get("origin_x") or 461.0)
-    oy = float(calibration.get("origin_y") or 33.0)
+    z_up = float(calibration["origin_z"])
+    z_dn = float(calibration["pen_down_z"])
+    ox   = float(calibration["origin_x"])
+    oy   = float(calibration["origin_y"])
     if settings and settings.get("frameWidth") and settings.get("resWidth"):
         mm_per_px_x = float(settings["frameWidth"])  / float(settings["resWidth"])
         mm_per_px_y = float(settings["frameHeight"]) / float(settings["resHeight"])
     else:
-        mm_per_px_x = float(calibration.get("pixel_spacing_mm") or 2.0)
+        mm_per_px_x = float(calibration["pixel_spacing_mm"])
         mm_per_px_y = mm_per_px_x
 
     path = []
@@ -284,7 +279,10 @@ class DrawingEngine:
     # ── 실제 드로잉 실행 (별도 스레드) ─────────────────────────
     def _run(self, pixels: list[dict], settings: dict):
         self._start_time = time.time()
-        calib   = self.db.get_active_calibration() or DEFAULT_CALIBRATION
+        calib   = self.db.get_active_calibration()
+        if calib is None:
+            raise RuntimeError("활성 캘리브레이션 없음 — 캘리브레이션 탭에서 저장하세요")
+        self.robot.load_config()
         dry_run = bool(settings.get("dryRun", False))
 
         if settings.get("drawMode") == "contour":
