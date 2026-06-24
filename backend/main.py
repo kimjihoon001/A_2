@@ -11,12 +11,14 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from contextlib import asynccontextmanager
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
+from dsr_msgs2.srv import ServoOff, SetRobotControl
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from config import WS_HOST, WS_PORT, STATUS_INTERVAL_SEC, DEFAULT_CALIBRATION
@@ -34,6 +36,7 @@ db      = Database()
 _clients: set[WebSocket] = set()
 _loop  : asyncio.AbstractEventLoop = None   # type: ignore
 _last_status: dict = {}                     # ROS2 → HMI 캐시
+_last_status_time: float = 0.0             # robot_art_node 마지막 수신 시각
 
 
 # ── ROS2 브리지 노드 ──────────────────────────────────────────────
@@ -46,12 +49,16 @@ class BridgeNode(Node):
         # 픽셀 발행 (→ robot_art_node)
         self._pixels_pub = self.create_publisher(String, '/robot_art/pixels', 10)
 
-        # 서비스 클라이언트
+        # 서비스 클라이언트 (robot_art_node 경유)
         self._svc = {
             name: self.create_client(Trigger, f'/robot_art/{name}')
-            for name in ('start', 'stop', 'estop', 'release_estop', 'home',
+            for name in ('start', 'stop', 'home',
                          'gripper_open', 'gripper_close', 'calibrate_z')
         }
+
+        # DSR 직접 서비스 클라이언트 (estop/release)
+        self._servo_off_client = self.create_client(ServoOff,         '/dsr01/system/servo_off')
+        self._servo_on_client  = self.create_client(SetRobotControl,  '/dsr01/system/set_robot_control')
 
         # 상태/로그 구독 (robot_art_node →)
         self.create_subscription(String, '/robot_art/status', self._on_status, 10)
@@ -71,19 +78,51 @@ class BridgeNode(Node):
         client = self._svc[name]
         if not client.wait_for_service(timeout_sec=timeout):
             return {'success': False, 'message': f'{name} 서비스 응답 없음 (타임아웃 {timeout}s)'}
+        done = threading.Event()
+        result_box: list = [None]
+        def _cb(f):
+            result_box[0] = f.result()
+            done.set()
         future = client.call_async(Trigger.Request())
-        rclpy.spin_until_future_complete(self, future, timeout_sec=timeout)
-        if future.done():
-            r = future.result()
-            return {'success': r.success, 'message': r.message}
-        return {'success': False, 'message': f'{name} 서비스 응답 없음'}
+        future.add_done_callback(_cb)
+        if not done.wait(timeout=timeout):
+            return {'success': False, 'message': f'{name} 서비스 응답 없음 (타임아웃 {timeout}s)'}
+        r = result_box[0]
+        return {'success': r.success, 'message': r.message}
+
+    def call_estop(self, timeout: float = 5.0) -> dict:
+        if not self._servo_off_client.wait_for_service(timeout_sec=timeout):
+            return {'success': False, 'message': 'servo_off 서비스 응답 없음'}
+        done = threading.Event()
+        result_box: list = [None]
+        req = ServoOff.Request()
+        req.stop_type = ServoOff.Request.STOP_TYPE_QUICK
+        future = self._servo_off_client.call_async(req)
+        future.add_done_callback(lambda f: (result_box.__setitem__(0, f.result()), done.set()))
+        if not done.wait(timeout=timeout):
+            return {'success': False, 'message': 'servo_off 응답 타임아웃'}
+        return {'success': result_box[0].success, 'message': 'E-STOP 활성화'}
+
+    def call_release_estop(self, timeout: float = 5.0) -> dict:
+        if not self._servo_on_client.wait_for_service(timeout_sec=timeout):
+            return {'success': False, 'message': 'set_robot_control 서비스 응답 없음'}
+        done = threading.Event()
+        result_box: list = [None]
+        req = SetRobotControl.Request()
+        req.robot_control = 3  # CONTROL_RESET_SAFET_OFF → STATE_STANDBY
+        future = self._servo_on_client.call_async(req)
+        future.add_done_callback(lambda f: (result_box.__setitem__(0, f.result()), done.set()))
+        if not done.wait(timeout=timeout):
+            return {'success': False, 'message': 'set_robot_control 응답 타임아웃'}
+        return {'success': result_box[0].success, 'message': 'E-STOP 해제'}
 
     # ── 구독 콜백 ──────────────────────────────────────────────
     def _on_status(self, msg: String):
-        global _last_status
+        global _last_status, _last_status_time
         try:
             data = json.loads(msg.data)
             _last_status = data
+            _last_status_time = time.time()
             if _loop:
                 asyncio.run_coroutine_threadsafe(broadcast(data), _loop)
         except Exception:
@@ -99,6 +138,19 @@ class BridgeNode(Node):
 
 
 _bridge: BridgeNode = None   # type: ignore
+
+# STATUS_INTERVAL_SEC의 5배 이내에 수신이 없으면 node 오프라인 판정
+_NODE_TIMEOUT = STATUS_INTERVAL_SEC * 5
+
+def _node_online() -> bool:
+    return _last_status_time > 0 and (time.time() - _last_status_time) < _NODE_TIMEOUT
+
+def _current_robot_state() -> dict:
+    """최신 robot 상태 반환. node 오프라인이면 ros2/connected를 False로 override."""
+    robot = _last_status.get("robot", {}) if _last_status else {}
+    if not _node_online():
+        robot = {**robot, "ros2": False, "connected": False, "powered": False}
+    return robot
 
 
 # ── 브리지 스레드 (SingleThreadedExecutor) ───────────────────────
@@ -179,12 +231,12 @@ async def handle_command(ws: WebSocket, msg: dict):
         await ws.send_text(json.dumps({"type": "log", "level": "WARNING", "message": result['message']}))
 
     elif cmd == "estop":
-        result = await asyncio.to_thread(_bridge.call_service, 'estop')
+        result = await asyncio.to_thread(_bridge.call_estop)
         db.add_log("E-STOP 활성화", "ERROR")
         await broadcast({"type": "log", "level": "ERROR", "message": result['message']})
 
     elif cmd == "reset_estop":
-        result = await asyncio.to_thread(_bridge.call_service, 'release_estop')
+        result = await asyncio.to_thread(_bridge.call_release_estop)
         db.add_log("E-STOP 해제", "INFO")
         await broadcast({"type": "log", "level": "INFO", "message": result['message']})
 
@@ -252,8 +304,12 @@ async def handle_command(ws: WebSocket, msg: dict):
         await ws.send_text(json.dumps({"type": "log", "level": "INFO", "message": "설정 저장 완료"}))
 
     elif cmd == "get_status":
-        await ws.send_text(json.dumps({**_last_status, "type": "status"} if _last_status
-                           else {"type": "status", "message": "robot_art_node 미연결"}))
+        robot = _current_robot_state()
+        if _last_status:
+            status_data = {**_last_status, "type": "status", "nodeOnline": _node_online(), "robot": robot}
+        else:
+            status_data = {"type": "status", "nodeOnline": False, "message": "robot_art_node 미연결"}
+        await ws.send_text(json.dumps(status_data))
 
     else:
         await ws.send_text(json.dumps({"type": "error", "message": f"알 수 없는 명령: {cmd}"}))
@@ -266,10 +322,17 @@ async def websocket_endpoint(ws: WebSocket):
     _clients.add(ws)
     log.info(f"HMI 연결: {ws.client}")
 
+    robot = _current_robot_state()
+    robot_conn = {
+        "ip"      : robot.get("robotIp", ""),
+        "port"    : robot.get("robotPort", 0),
+        "protocol": "ROS2",
+    } if robot.get("ros2") else None
     await ws.send_text(json.dumps({
-        "type"   : "connected",
-        "message": "Robot Art Bridge 연결 완료",
-        **({"robot": _last_status.get("robot", {})} if _last_status else {}),
+        "type"     : "connected",
+        "message"  : "Robot Art Bridge 연결 완료",
+        "robot"    : robot,
+        "robotConn": robot_conn,
     }))
 
     try:

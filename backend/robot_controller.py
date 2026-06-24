@@ -63,14 +63,14 @@ log = logging.getLogger(__name__)
 
 ROBOT_ID    = "dsr01"
 ROBOT_MODEL = "m0609"
-DSR_IMP_PATH = "/home/jihoon/ros2_ws/src/DoosanBootcamp/dsr_common2/imp"
+DSR_IMP_PATH = str(os.path.join(os.path.expanduser("~"), "ws_cobot_pjt/ws_edu/src/cobot_rg2/doosan-robot2/dsr_common2/imp"))
 
 
 def _read_dsr_robot_params() -> tuple[str, int]:
     """dsr_hardware2 config YAML 파일에서 robot host/port를 읽어 반환. 실패 시 config.py 값 사용."""
     try:
         import glob
-        pattern = f"/home/jihoon/ros2_ws/install/dsr_hardware2/share/dsr_hardware2/config/{ROBOT_ID}_parameters.yaml"
+        pattern = f"/home/jihoon/ws_cobot_pjt/ws_edu/install/dsr_hardware2/share/dsr_hardware2/config/{ROBOT_ID}_parameters.yaml"
         matches = glob.glob(pattern)
         if not matches:
             raise FileNotFoundError(f"파라미터 파일 없음: {pattern}")
@@ -90,6 +90,7 @@ def _read_dsr_robot_params() -> tuple[str, int]:
 # ── DSR_ROBOT2 초기화 시도 ───────────────────────────────────────
 _dsr_available = False
 _dsr_funcs: dict = {}   # movel, movej, move_home, get_current_posj, get_current_posx, get_robot_state
+_controller: 'RobotController | None' = None
 
 def _init_dsr() -> bool:
     global _dsr_available, _dsr_funcs
@@ -108,6 +109,12 @@ def _init_dsr() -> bool:
 
         node = rclpy.create_node('robot_art_controller', namespace=ROBOT_ID)
         DR_init.__dsr__node = node
+
+        # DSR 노드 전용 executor — 별도 스레드에서 spin (서비스 응답 수신용)
+        dsr_executor = rclpy.executors.SingleThreadedExecutor()
+        dsr_executor.add_node(node)
+        dsr_spin_thread = threading.Thread(target=dsr_executor.spin, daemon=True, name='dsr_executor')
+        dsr_spin_thread.start()
 
         from DSR_ROBOT2 import (
             set_robot_mode,
@@ -150,19 +157,63 @@ def _init_dsr() -> bool:
             'DR_FC_MOD_REL':            DR_FC_MOD_REL,
         }
 
-        # MoveStop 서비스 직접 클라이언트 (E-STOP용)
-        from dsr_msgs2.srv import MoveStop
-        _stop_client = node.create_client(MoveStop, f'/{ROBOT_ID}/motion/move_stop')
-        _dsr_funcs['stop_client'] = _stop_client
-        _dsr_funcs['MoveStop']    = MoveStop
+        # MoveStop 서비스 클라이언트 (E-STOP용)
+        from dsr_msgs2.srv import MoveStop, SetRobotControl, GetRobotState
+        _stop_client     = node.create_client(MoveStop,         f'/{ROBOT_ID}/motion/move_stop')
+        _servo_on_client = node.create_client(SetRobotControl,  f'/{ROBOT_ID}/system/set_robot_control')
+        _state_client    = node.create_client(GetRobotState,    f'/{ROBOT_ID}/system/get_robot_state')
+        _dsr_funcs['stop_client']      = _stop_client
+        _dsr_funcs['servo_on_client']  = _servo_on_client
+        _dsr_funcs['state_client']     = _state_client
+        _dsr_funcs['MoveStop']         = MoveStop
+        _dsr_funcs['SetRobotControl']  = SetRobotControl
+        _dsr_funcs['GetRobotState']    = GetRobotState
+        _dsr_funcs['dsr_executor']     = dsr_executor
 
         _dsr_available = True
         log.info("DSR_ROBOT2 초기화 성공 — 실제 M0609 제어 모드")
+
+        # 로봇 상태 폴링 타이머 (0.5초마다 estop 감지)
+        node.create_timer(0.5, _poll_robot_state)
         return True
 
     except Exception as e:
         log.warning(f"DSR_ROBOT2 초기화 실패 → 시뮬레이션 모드: {e}")
         return False
+
+
+_ESTOP_STATES = {5, 6}  # STATE_SAFE_STOP, STATE_EMERGENCY_STOP
+
+
+def _poll_robot_state():
+    try:
+        client = _dsr_funcs.get('state_client')
+        GetRobotState = _dsr_funcs.get('GetRobotState')
+        if client is None or not client.service_is_ready():
+            return
+        future = client.call_async(GetRobotState.Request())
+        future.add_done_callback(_on_robot_state)
+    except Exception as e:
+        log.warning(f"robot state 폴링 오류: {e}")
+
+
+def _on_robot_state(future):
+    try:
+        result = future.result()
+        if result is None or _controller is None:
+            return
+        state = result.robot_state
+        with _controller._lock:
+            if state in _ESTOP_STATES and not _controller.state.estop:
+                log.warning(f"외부 E-STOP 감지 (robot_state={state})")
+                _controller.state.estop  = True
+                _controller.state.status = "estop"
+            elif state not in _ESTOP_STATES and _controller.state.estop:
+                log.info(f"E-STOP 해제 감지 (robot_state={state})")
+                _controller.state.estop  = False
+                _controller.state.status = "idle"
+    except Exception as e:
+        log.warning(f"robot state 콜백 오류: {e}")
 
 
 # ── 상태 ────────────────────────────────────────────────────────
@@ -188,9 +239,11 @@ class RobotController:
     _HOME_TCP    = (423.0, 12.0, 315.0)
 
     def __init__(self):
+        global _controller
         self.state = RobotState()
         self._lock = threading.Lock()
         self.robot_ip, self.robot_port = _read_dsr_robot_params()
+        _controller = self
 
     # ── 연결 ────────────────────────────────────────────────────
     def connect(self) -> bool:
@@ -200,12 +253,15 @@ class RobotController:
             self._sync_state_from_robot()   # 초기 TCP 위치
             self._start_joint_subscriber()  # joint_states 토픽 구독
             log.info("M0609 연결됨 (DSR_ROBOT2)")
+            with self._lock:
+                self.state.connected = True
+                self.state.powered   = True
         else:
-            log.info("시뮬레이션 모드로 연결")
+            log.info("시뮬레이션 모드 (로봇 미연결)")
+            with self._lock:
+                self.state.connected = False
+                self.state.powered   = False
         self._start_gripper_poll()          # 그리퍼 너비 폴링 (항상)
-        with self._lock:
-            self.state.connected = True
-            self.state.powered   = True
         return True
 
     def ensure_real_connection(self) -> bool:
@@ -293,15 +349,18 @@ class RobotController:
 
         if _dsr_available:
             try:
+                import threading as _threading
+                client = _dsr_funcs['stop_client']
                 MoveStop = _dsr_funcs['MoveStop']
-                client   = _dsr_funcs['stop_client']
-                rclpy    = _dsr_funcs['rclpy']
-                node     = _dsr_funcs['node']
                 req = MoveStop.Request()
-                req.stop_mode = 0  # STOP_TYPE_QUICK_STO (STO → 안전회로 트리거 + 빨간 램프)
+                req.stop_mode = 1  # DR_QSTOP: 소프트웨어 즉시 정지 (STO 없이 복구 가능)
+                done = _threading.Event()
                 future = client.call_async(req)
-                rclpy.spin_until_future_complete(node, future, timeout_sec=2.0)
-                log.info("E-STOP: move_stop 완료")
+                future.add_done_callback(lambda _: done.set())
+                if not done.wait(timeout=2.0):
+                    log.warning("E-STOP: move_stop 응답 타임아웃")
+                else:
+                    log.info("E-STOP: move_stop 완료")
             except Exception as e:
                 log.error(f"E-STOP 처리 실패: {e}")
 
@@ -309,12 +368,20 @@ class RobotController:
         log.info("E-STOP 해제")
         if _dsr_available:
             try:
-                from DSR_ROBOT2 import set_robot_mode
-                from DRFC import ROBOT_MODE_AUTONOMOUS
-                set_robot_mode(ROBOT_MODE_AUTONOMOUS)
-                log.info("E-STOP 해제: AUTONOMOUS 모드 복귀")
+                import threading as _threading
+                client = _dsr_funcs['servo_on_client']
+                SetRobotControl = _dsr_funcs['SetRobotControl']
+                req = SetRobotControl.Request()
+                req.robot_control = 3  # CONTROL_RESET_SAFET_OFF → STATE_STANDBY
+                done = _threading.Event()
+                future = client.call_async(req)
+                future.add_done_callback(lambda _: done.set())
+                if not done.wait(timeout=2.0):
+                    log.warning("E-STOP 해제: set_robot_control 응답 타임아웃")
+                else:
+                    log.info("E-STOP 해제: 서보 온 완료")
             except Exception as e:
-                log.error(f"AUTONOMOUS 모드 복귀 실패: {e}")
+                log.error(f"서보 온 실패: {e}")
         with self._lock:
             self.state.estop  = False
             self.state.status = "idle"
@@ -508,16 +575,16 @@ class RobotController:
             DR_MV_MOD_REL = _dsr_funcs['DR_MV_MOD_REL']
             DR_FC_MOD_REL = _dsr_funcs['DR_FC_MOD_REL']
 
-            start_offset = pixel_size / 2.0
-            hover_pos = posx(x - start_offset, y + start_offset, z_up,    0, 180, 0)
-            ready_pos = posx(x - start_offset, y + start_offset, z_ready, 0, 180, 0)
+            # 픽셀 좌상단을 hover 목표로 설정 (접촉 후 긁힘 방지)
+            hover_pos = posx(x - pixel_size, y + pixel_size, z_up, 0, 180, 0)
 
             try:
-                # 상공 → 종이 근처로 이동
+                # 상공 → 좌상단으로 이동
                 ret = movel(hover_pos, vel=MOVE_SPEED, acc=MOVE_SPEED * 2)
                 log.info(f"movel hover ret={ret}")
-                ret = movel(ready_pos, vel=DRAW_SPEED, acc=DRAW_SPEED * 2)
-                log.info(f"movel ready ret={ret}")
+
+                if self.state.estop:
+                    return
 
                 # 컴플라이언스 + 목표 힘 인가
                 time.sleep(0.03)
@@ -532,6 +599,8 @@ class RobotController:
                 t0 = time.time()
                 deadline = t0 + 1.5
                 while time.time() < deadline:
+                    if self.state.estop:
+                        return
                     with self._lock:
                         fz = abs(self.state.tool_force[2]) if len(self.state.tool_force) > 2 else 0
                     if fz >= force * 0.7:
@@ -546,15 +615,12 @@ class RobotController:
                 with self._lock:
                     self.state.pen_force = force
 
-                # 래스터 스캔 시작점(좌상단)으로 미세 이동
-                amovel(posx(-start_offset, start_offset, 0, 0, 0, 0),
-                       vel=10, acc=20, ref=DR_BASE, mod=DR_MV_MOD_REL)
-                time.sleep(0.05)
-
                 # ㄹ자 패턴
                 lines     = int(pixel_size / pitch)
                 direction = 1
                 for i in range(lines + 1):
+                    if self.state.estop:
+                        return
                     amovel(posx(direction * pixel_size, 0, 0, 0, 0, 0),
                            vel=10, acc=20, ref=DR_BASE, mod=DR_MV_MOD_REL)
                     time.sleep(0.05)
@@ -600,10 +666,8 @@ class RobotController:
             DR_BASE = _dsr_funcs['DR_BASE']
 
             hover = posx(points[0][0], points[0][1], z_up, 0, 180, 0)
-            ready = posx(points[0][0], points[0][1], z_dn, 0, 180, 0)
 
             movel(hover, vel=[MOVE_SPEED, MOVE_SPEED], acc=[MOVE_SPEED*2, MOVE_SPEED*2], ref=DR_BASE)
-            movel(ready, vel=[DRAW_SPEED, DRAW_SPEED], acc=[DRAW_SPEED*2, DRAW_SPEED*2], ref=DR_BASE)
 
             try:
                 _dsr_funcs['task_compliance_ctrl']([3000, 3000, 500, 100, 100, 100])
@@ -653,7 +717,7 @@ class RobotController:
         반환: {'contact_z': float, 'pen_up_z': float, 'pen_down_z': float}
         """
         Z_START         = 280.0   # 탐색 시작 높이 (mm)
-        FORCE_THRESHOLD = 1.5     # 접촉 감지 임계 힘 (N)
+        FORCE_THRESHOLD = 0.8     # 접촉 감지 임계 힘 (N)
 
         if self.state.estop:
             raise RuntimeError("E-STOP 상태에서 Z 측정 불가")
@@ -669,10 +733,10 @@ class RobotController:
         start_pos = posx(origin_x, origin_y, Z_START, 0.0, 180.0, 0.0)
         movel(start_pos, vel=[MOVE_SPEED, MOVE_SPEED], acc=[MOVE_SPEED * 2, MOVE_SPEED * 2], ref=DR_BASE)
 
-        _dsr_funcs['task_compliance_ctrl']([3000, 3000, 100, 3100, 3100, 100])
+        _dsr_funcs['task_compliance_ctrl']([3000, 3000, 500, 3100, 3100, 100])
         time.sleep(0.05)
         _dsr_funcs['set_desired_force'](
-            [0, 0, -2.0, 0, 0, 0],
+            [0, 0, -1.0, 0, 0, 0],
             dir=[0, 0, 1, 0, 0, 0],
             mod=_dsr_funcs['DR_FC_MOD_REL'],
         )
@@ -755,6 +819,8 @@ class RobotController:
                 "penForce"     : round(s.pen_force, 2),
                 "toolForce"    : [round(v, 2) for v in s.tool_force],
                 "ros2"         : _dsr_available,
+                "robotIp"      : self.robot_ip,
+                "robotPort"    : self.robot_port,
             }
 
     def set_status(self, status: str):
