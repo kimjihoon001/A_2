@@ -7,6 +7,7 @@ interface Props {
   history: HistoryPoint[];
   alarms: Alarm[];
   drawingState: DrawingState;
+  ros2Connected: boolean;
 }
 
 function StatCard({ label, value, color, sub, highlight }: {
@@ -36,7 +37,7 @@ function etaStr(drawingState: DrawingState): string {
   return m > 0 ? `${m}분 ${s}초` : `${s}초`;
 }
 
-export default function Dashboard({ robotState, history, alarms, drawingState }: Props) {
+export default function Dashboard({ robotState, history, alarms, drawingState, ros2Connected }: Props) {
   const { status, joints, speed, tcpX, tcpY, tcpZ, penForce } = robotState;
   const drawProgress = drawingState.totalPixels > 0
     ? Math.round((drawingState.currentPixel / drawingState.totalPixels) * 100) : 0;
@@ -54,8 +55,8 @@ export default function Dashboard({ robotState, history, alarms, drawingState }:
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 14, marginBottom: 20 }}>
         <StatCard
           label="로봇 상태"
-          value={STATUS_LABEL[status] ?? status}
-          color={STATUS_COLOR[status] ?? 'var(--text)'}
+          value={!ros2Connected ? '미연결' : (STATUS_LABEL[status] ?? status)}
+          color={!ros2Connected ? 'var(--text2)' : (STATUS_COLOR[status] ?? 'var(--text)')}
           highlight={status === 'estop' || status === 'error'}
         />
         <StatCard

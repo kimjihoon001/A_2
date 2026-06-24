@@ -66,23 +66,20 @@ export const FRAME_SIZES = [
 export const PAPER_TYPES = ['일반 용지', '수채화지', '캔버스', '아크릴보드'];
 
 export const RESOLUTIONS = [
-  { key:  '50', label:  '50×50  (2,500픽셀)  · 빠름',     w:  50, h:  50 },
-  { key:  '64', label:  '64×64  (4,096픽셀)',              w:  64, h:  64 },
-  { key:  '80', label:  '80×80  (6,400픽셀)',              w:  80, h:  80 },
-  { key: '100', label: '100×100 (10,000픽셀) · 기본',     w: 100, h: 100 },
-  { key: '150', label: '150×150 (22,500픽셀)',             w: 150, h: 150 },
-  { key: '200', label: '200×200 (40,000픽셀) · 고해상도', w: 200, h: 200 },
-  { key: 'custom', label: '커스텀',                       w:   0, h:   0 },
+  { key:  'A5_S',  label:  '50×71   (3,550픽셀)  · 빠름',    w:  50, h:  71 },
+  { key:  'A5_M',  label:  '74×105  (7,770픽셀)  · 중간',    w:  74, h: 105 },
+  { key:  'A5_L',  label: '100×142 (14,200픽셀) · 기본',     w: 100, h: 142 },
+  { key:  'A5_XL', label: '148×210 (31,080픽셀) · 고해상도 (1px=1mm)', w: 148, h: 210 },
 ];
 
 export const DEFAULT_ART_SETTINGS: ArtSettings = {
-  frameSizeKey: 'SQ128',
-  frameWidth:   128,
-  frameHeight:  128,
+  frameSizeKey: 'A5',
+  frameWidth:   148,
+  frameHeight:  210,
   paperType:    '일반 용지',
-  resolutionKey:'64',
-  resWidth:      64,
-  resHeight:     64,
+  resolutionKey:'A5_M',
+  resWidth:      74,
+  resHeight:     105,
   brightness:   1.0,
   contrast:     1.0,
   rotation:     0,
@@ -91,8 +88,8 @@ export const DEFAULT_ART_SETTINGS: ArtSettings = {
   penForceMin:   3,
   penForceMax:  10,
   dryRun:       false,
-  originX:      463.94,
-  originY:      171.03,
+  originX:      356.0,
+  originY:      -41.0,
 };
 
 export const INITIAL_DRAWING_STATE: DrawingState = {

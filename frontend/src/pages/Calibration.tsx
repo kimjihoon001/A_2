@@ -13,11 +13,13 @@ interface Props {
 }
 
 const DEFAULT_CALIB: CalibrationData = {
-  origin_x:         463.94,
-  origin_y:         171.03,
-  origin_z:         254.58,
-  pen_down_z:       253.58,
+  origin_x:         461.0,   // S자 좌상단
+  origin_y:          33.0,
+  origin_z:         436.33,
+  pen_down_z:       435.33,
   pixel_spacing_mm:   2.0,
+  center_x:         356.0,   // 동심원 중심
+  center_y:         -41.0,
 };
 
 function Row({ label, value, unit }: { label: string; value: string | number; unit?: string }) {
@@ -143,16 +145,18 @@ export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCa
         </div>
       </div>
 
-      {/* 종이 원점 수동 설정 */}
-      <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-title">종이 원점 수동 설정</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
-          {numField('origin_x', '원점 X', 'mm')}
-          {numField('origin_y', '원점 Y', 'mm')}
-          {numField('origin_z', '원점 Z (펜 이동 높이)', 'mm')}
-        </div>
-        <div style={{ marginTop: 12, padding: '10px 12px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
-          💡 로봇을 종이 좌상단에 위치시킨 후 "현재 위치를 종이 원점으로 저장" 버튼을 누르면 자동 입력됩니다.
+      {/* 좌표 설정 */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+        {/* S자 — 좌상단 */}
+        <div className="card">
+          <div className="card-title">▶ S자 기준점 (종이 좌상단)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {numField('origin_x', 'X', 'mm')}
+            {numField('origin_y', 'Y', 'mm')}
+          </div>
+          <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--panel2)', borderRadius: 6, fontSize: 11, color: 'var(--text2)' }}>
+            로봇을 종이 좌상단 모서리에 위치시킨 후 저장
+          </div>
         </div>
       </div>
 

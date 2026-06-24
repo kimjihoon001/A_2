@@ -25,13 +25,23 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
   const [penGray, setPenGray]             = useState(0);
   const [redrawKey, setRedrawKey]         = useState(0);
 
-  const dragCounter        = useRef(0);
-  const isMouseDown        = useRef(false);
-  const pixelDataRef       = useRef<PixelPoint[]>([]);
-  const scaleRef           = useRef(1);
-  const gapRef             = useRef(0);
-  const processedCanvasRef = useRef<HTMLCanvasElement>(null);
-  const fileInputRef       = useRef<HTMLInputElement>(null);
+  const [cropMode, setCropMode]         = useState(false);
+  const [cropRect, setCropRect]         = useState<{x1:number,y1:number,x2:number,y2:number} | null>(null);
+  const [appliedRect, setAppliedRect]   = useState<{x1:number,y1:number,x2:number,y2:number} | null>(null);
+  const [croppedUrl, setCroppedUrl]     = useState('');
+  const [cropAspectLock, setCropAspectLock] = useState(false);
+
+  const dragCounter          = useRef(0);
+  const isMouseDown          = useRef(false);
+  const pixelDataRef         = useRef<PixelPoint[]>([]);
+  const scaleRef             = useRef(1);
+  const gapRef               = useRef(0);
+  const processedCanvasRef   = useRef<HTMLCanvasElement>(null);
+  const fileInputRef         = useRef<HTMLInputElement>(null);
+  const origImgRef           = useRef<HTMLImageElement>(null);
+  const cropContainerRef     = useRef<HTMLDivElement>(null);
+  const cropDragging         = useRef(false);
+  const cropStartRef         = useRef<{x:number,y:number} | null>(null);
 
   // Refs used in event handlers to always read latest values (avoids stale closure)
   const bottomPanelRef = useRef<BottomPanel>(null);
@@ -40,11 +50,11 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
   const brushSizeRef   = useRef(1);
   const artSettingsRef = useRef(artSettings);
 
-  bottomPanelRef.current = bottomPanel;
-  editToolRef.current    = editTool;
-  penGrayRef.current     = penGray;
-  brushSizeRef.current   = brushSize;
-  artSettingsRef.current = artSettings;
+  bottomPanelRef.current    = bottomPanel;
+  editToolRef.current       = editTool;
+  penGrayRef.current        = penGray;
+  brushSizeRef.current      = brushSize;
+  artSettingsRef.current    = artSettings;
 
   useEffect(() => { pixelDataRef.current = [...pixelData]; }, [pixelData]);
 
@@ -53,60 +63,77 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
     if (!imageFile) { setOriginalUrl(''); return; }
     const url = URL.createObjectURL(imageFile);
     setOriginalUrl(url);
+    setCroppedUrl(prev => { if (prev) URL.revokeObjectURL(prev); return ''; });
+    setCropRect(null);
+    setAppliedRect(null);
+    setCropMode(false);
     return () => URL.revokeObjectURL(url);
   }, [imageFile]);
 
-  // Image processing — runs whenever originalUrl or artSettings changes
+  // Revoke croppedUrl on unmount or when replaced
   useEffect(() => {
-    if (!originalUrl) return;
+    return () => { if (croppedUrl) URL.revokeObjectURL(croppedUrl); };
+  }, [croppedUrl]);
+
+  // Image processing — runs whenever activeUrl, artSettings, or drawMode changes
+  useEffect(() => {
+    const activeUrl = croppedUrl || originalUrl;
+    if (!activeUrl) return;
     let cancelled = false;
     const img = new Image();
     img.onload = () => {
       if (cancelled) return;
-      const { resWidth, resHeight, brightness, contrast, rotation, flipH, flipV } = artSettingsRef.current;
+      const { resWidth, resHeight, frameWidth, frameHeight, brightness, contrast, rotation, flipH, flipV } = artSettingsRef.current;
 
-      const proc = document.createElement('canvas');
-      proc.width  = resWidth;
-      proc.height = resHeight;
-      const pCtx  = proc.getContext('2d')!;
-
-      pCtx.save();
-      pCtx.translate(resWidth / 2, resHeight / 2);
-      if (rotation) pCtx.rotate((rotation * Math.PI) / 180);
-      if (flipH) pCtx.scale(-1, 1);
-      if (flipV) pCtx.scale(1, -1);
-      const srcA = img.width / img.height;
-      const dstA = resWidth / resHeight;
-      let dw, dh;
-      if (srcA > dstA) { dh = resHeight; dw = dh * srcA; }
-      else              { dw = resWidth;  dh = dw / srcA; }
-      pCtx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
-      pCtx.restore();
-
-      const imgData = pCtx.getImageData(0, 0, resWidth, resHeight);
-      const pixels: PixelPoint[] = [];
-
-      for (let i = 0; i < imgData.data.length; i += 4) {
-        const r = imgData.data[i], g = imgData.data[i + 1], b = imgData.data[i + 2];
-        let gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-        gray = clamp(Math.round(gray * brightness), 0, 255);
-        gray = clamp(Math.round((gray - 128) * contrast + 128), 0, 255);
-        imgData.data[i] = imgData.data[i + 1] = imgData.data[i + 2] = gray;
-        pixels.push({ x: (i / 4) % resWidth, y: Math.floor((i / 4) / resWidth), gray });
+      function processAtRes(w: number, h: number): { pixels: PixelPoint[]; imgData: ImageData } {
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d')!;
+        ctx.save();
+        ctx.translate(w / 2, h / 2);
+        if (rotation) ctx.rotate((rotation * Math.PI) / 180);
+        if (flipH) ctx.scale(-1, 1);
+        if (flipV) ctx.scale(1, -1);
+        const srcA = img.width / img.height;
+        const dstA = w / h;
+        let dw, dh;
+        // fit (letterbox): 이미지 전체가 보이도록 — 여백은 흰색(255, 스킵됨)
+        if (srcA > dstA) { dw = w; dh = w / srcA; }
+        else              { dh = h; dw = h * srcA; }
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+        ctx.restore();
+        const id = ctx.getImageData(0, 0, w, h);
+        const px: PixelPoint[] = [];
+        for (let i = 0; i < id.data.length; i += 4) {
+          const r = id.data[i], g = id.data[i + 1], b = id.data[i + 2];
+          let gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+          gray = clamp(Math.round(gray * brightness), 0, 255);
+          gray = clamp(Math.round((gray - 128) * contrast + 128), 0, 255);
+          id.data[i] = id.data[i + 1] = id.data[i + 2] = gray;
+          px.push({ x: (i / 4) % w, y: Math.floor((i / 4) / w), gray });
+        }
+        ctx.putImageData(id, 0, 0);
+        return { pixels: px, imgData: id };
       }
-      pCtx.putImageData(imgData, 0, 0);
+
+      // 픽셀 모드용 — 저해상도
+      const { pixels } = processAtRes(resWidth, resHeight);
       setPixelData(pixels);
       pixelDataRef.current = pixels;
 
+      // 미리보기 캔버스 렌더링
       const disp = processedCanvasRef.current;
       if (!disp) return;
       const maxW = disp.parentElement?.clientWidth  || 480;
       const maxH = disp.parentElement?.clientHeight || 400;
+
+      // 미리보기: 항상 저해상도 픽셀 격자로 표시
       const scale = clamp(Math.floor(Math.min(maxW / resWidth, maxH / resHeight)), 1, 12);
       const gap   = scale >= 5 ? 1 : 0;
       scaleRef.current = scale;
       gapRef.current   = gap;
-
       disp.width  = resWidth  * (scale + gap);
       disp.height = resHeight * (scale + gap);
       const dCtx = disp.getContext('2d')!;
@@ -120,9 +147,9 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
         }
       }
     };
-    img.src = originalUrl;
+    img.src = activeUrl;
     return () => { cancelled = true; };
-  }, [originalUrl, artSettings, redrawKey]); // redrawKey: 편집 모드 진입/종료 시 컨테이너 크기 반영
+  }, [originalUrl, croppedUrl, artSettings, redrawKey]);
 
   // ── 픽셀 페인팅 ──────────────────────────────────────────────
   function getPixelCoord(e: React.MouseEvent<HTMLCanvasElement>) {
@@ -205,6 +232,84 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
     setArtSettings(s => ({ ...s, [k]: v }));
   }
 
+  // ── 크롭 선택 ─────────────────────────────────────────────────
+  function getCropRelCoords(e: React.MouseEvent) {
+    const rect = origImgRef.current!.getBoundingClientRect();
+    return {
+      x: clamp((e.clientX - rect.left) / rect.width, 0, 1),
+      y: clamp((e.clientY - rect.top) / rect.height, 0, 1),
+    };
+  }
+
+  function handleCropMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    if (!origImgRef.current) return;
+    const c = getCropRelCoords(e);
+    cropDragging.current = true;
+    cropStartRef.current = c;
+    setCropRect({ x1: c.x, y1: c.y, x2: c.x, y2: c.y });
+  }
+
+  function handleCropMouseMove(e: React.MouseEvent) {
+    if (!cropDragging.current || !cropStartRef.current || !origImgRef.current) return;
+    const c = getCropRelCoords(e);
+    const s = cropStartRef.current;
+
+    if (!cropAspectLock) {
+      setCropRect({ x1: Math.min(s.x, c.x), y1: Math.min(s.y, c.y), x2: Math.max(s.x, c.x), y2: Math.max(s.y, c.y) });
+      return;
+    }
+
+    // 액자 비율 고정: 드래그 크기를 frameW:frameH 비율로 맞춤
+    const { frameWidth, frameHeight } = artSettingsRef.current;
+    const natW = origImgRef.current.naturalWidth;
+    const natH = origImgRef.current.naturalHeight;
+    const targetRatio = frameWidth / frameHeight; // e.g. 148/210
+
+    const rawPxW = Math.abs(c.x - s.x) * natW;
+    const rawPxH = Math.abs(c.y - s.y) * natH;
+
+    let finalPxW: number, finalPxH: number;
+    if (rawPxH < 1) { finalPxW = rawPxW; finalPxH = rawPxW / targetRatio; }
+    else if (rawPxW / rawPxH > targetRatio) { finalPxW = rawPxW; finalPxH = rawPxW / targetRatio; }
+    else                                     { finalPxH = rawPxH; finalPxW = rawPxH * targetRatio; }
+
+    const normW = finalPxW / natW;
+    const normH = finalPxH / natH;
+
+    const x1 = c.x >= s.x ? s.x : s.x - normW;
+    const y1 = c.y >= s.y ? s.y : s.y - normH;
+    setCropRect({
+      x1: clamp(x1, 0, 1), y1: clamp(y1, 0, 1),
+      x2: clamp(x1 + normW, 0, 1), y2: clamp(y1 + normH, 0, 1),
+    });
+  }
+
+  function handleCropMouseUp() { cropDragging.current = false; }
+
+  function applyCrop() {
+    if (!cropRect || !origImgRef.current) return;
+    const img = origImgRef.current;
+    const { x1, y1, x2, y2 } = cropRect;
+    const w = x2 - x1, h = y2 - y1;
+    if (w < 0.02 || h < 0.02) return;
+    const c = document.createElement('canvas');
+    c.width  = Math.round(w * img.naturalWidth);
+    c.height = Math.round(h * img.naturalHeight);
+    c.getContext('2d')!.drawImage(img,
+      x1 * img.naturalWidth, y1 * img.naturalHeight,
+      w  * img.naturalWidth, h  * img.naturalHeight,
+      0, 0, c.width, c.height
+    );
+    c.toBlob(blob => {
+      if (!blob) return;
+      setCroppedUrl(prev => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(blob!); });
+      setAppliedRect(cropRect);
+      setCropMode(false);
+      setCropRect(null);
+    });
+  }
+
   const editMode   = bottomPanel === 'pixel';
   const isRunning  = drawingState.status === 'running';
   const isFinished = ['success', 'failed', 'cancelled'].includes(drawingState.status);
@@ -278,12 +383,110 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
             <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#888', display: 'inline-block' }} />
               원본 이미지
+              {croppedUrl && <span className="tag tag-blue" style={{ marginLeft: 4 }}>크롭됨</span>}
+              {originalUrl && (
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                  {cropMode ? (
+                    <>
+                      <button
+                        className={cropAspectLock ? 'btn-ghost' : 'btn-primary'}
+                        style={{ fontSize: 11, padding: '3px 10px' }}
+                        onClick={() => setCropAspectLock(false)}>자유</button>
+                      <button
+                        className={cropAspectLock ? 'btn-primary' : 'btn-ghost'}
+                        style={{ fontSize: 11, padding: '3px 10px' }}
+                        onClick={() => setCropAspectLock(true)}>
+                        {artSettings.frameSizeKey.toUpperCase()} 비율
+                      </button>
+                      <div style={{ width: 1, height: 18, background: 'var(--border)', margin: '0 2px' }} />
+                      <button className="btn-outline" style={{ fontSize: 11, padding: '3px 10px' }}
+                        disabled={!cropRect || (cropRect.x2 - cropRect.x1) < 0.02}
+                        onClick={applyCrop}>확정</button>
+                      <button className="btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }}
+                        onClick={() => { setCropMode(false); setCropRect(null); }}>취소</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="btn-outline" style={{ fontSize: 11, padding: '3px 10px' }}
+                        disabled={isRunning}
+                        onClick={() => { setCropMode(true); setCropRect(null); }}>✂️ 크롭</button>
+                      {croppedUrl && (
+                        <button className="btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }}
+                          onClick={() => { setCroppedUrl(prev => { if (prev) URL.revokeObjectURL(prev); return ''; }); setAppliedRect(null); }}>
+                          초기화
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0, overflow: 'hidden' }}>
-              {originalUrl
-                ? <img src={originalUrl} alt="original" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6 }} />
-                : <span style={{ color: 'var(--text2)', fontSize: 13 }}>이미지를 업로드하면 여기에 표시됩니다</span>
-              }
+            <div ref={cropContainerRef} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0, overflow: 'hidden', position: 'relative' }}>
+              {originalUrl ? (
+                <>
+                  <img ref={origImgRef} src={originalUrl} alt="original"
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6, userSelect: 'none', pointerEvents: 'none', display: 'block' }} />
+                  {/* 크롭 모드: 드래그 선택 */}
+                  {cropMode && (
+                    <div style={{ position: 'absolute', inset: 0, cursor: 'crosshair' }}
+                      onMouseDown={handleCropMouseDown}
+                      onMouseMove={handleCropMouseMove}
+                      onMouseUp={handleCropMouseUp}
+                      onMouseLeave={handleCropMouseUp}>
+                      {cropRect && origImgRef.current && cropContainerRef.current && (() => {
+                        const imgR = origImgRef.current!.getBoundingClientRect();
+                        const cR  = cropContainerRef.current!.getBoundingClientRect();
+                        const bx = (imgR.left - cR.left) + cropRect.x1 * imgR.width;
+                        const by = (imgR.top  - cR.top)  + cropRect.y1 * imgR.height;
+                        const bw = (cropRect.x2 - cropRect.x1) * imgR.width;
+                        const bh = (cropRect.y2 - cropRect.y1) * imgR.height;
+                        return (
+                          <div style={{
+                            position: 'absolute', pointerEvents: 'none',
+                            left: bx, top: by, width: bw, height: bh,
+                            border: '2px solid #00ff88',
+                            background: 'rgba(0,255,136,0.1)',
+                            boxSizing: 'border-box',
+                          }} />
+                        );
+                      })()}
+                      {!cropRect && (
+                        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                          <span style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 13, padding: '6px 14px', borderRadius: 6 }}>
+                            드래그하여 영역 선택
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* 크롭 확정 후: 선택 영역 표시 */}
+                  {!cropMode && appliedRect && origImgRef.current && cropContainerRef.current && (() => {
+                    const imgR = origImgRef.current!.getBoundingClientRect();
+                    const cR  = cropContainerRef.current!.getBoundingClientRect();
+                    const bx = (imgR.left - cR.left) + appliedRect.x1 * imgR.width;
+                    const by = (imgR.top  - cR.top)  + appliedRect.y1 * imgR.height;
+                    const bw = (appliedRect.x2 - appliedRect.x1) * imgR.width;
+                    const bh = (appliedRect.y2 - appliedRect.y1) * imgR.height;
+                    return (
+                      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+                        {/* 어두운 마스크 */}
+                        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)' }} />
+                        {/* 선택 영역 구멍 (밝게) */}
+                        <div style={{
+                          position: 'absolute',
+                          left: bx, top: by, width: bw, height: bh,
+                          background: 'transparent',
+                          border: '2px solid #00ff88',
+                          boxShadow: '0 0 0 9999px rgba(0,0,0,0.45)',
+                          boxSizing: 'border-box',
+                        }} />
+                      </div>
+                    );
+                  })()}
+                </>
+              ) : (
+                <span style={{ color: 'var(--text2)', fontSize: 13 }}>이미지를 업로드하면 여기에 표시됩니다</span>
+              )}
             </div>
           </div>
         )}
@@ -294,7 +497,9 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' }} />
             <span style={{ fontWeight: 600, fontSize: 13 }}>변환 미리보기</span>
             {pixelData.length > 0 && (
-              <span className="tag tag-blue">{artSettings.resWidth}×{artSettings.resHeight}</span>
+              <span className="tag tag-blue">
+                {`${artSettings.resWidth}×${artSettings.resHeight} 픽셀`}
+              </span>
             )}
             {editMode && (
               <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: 4 }}>편집 모드 — 클릭·드래그하여 그리세요</span>
@@ -327,27 +532,6 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
 
       {/* ── 설정 행 ── */}
       <div style={{ padding: '0 24px 6px', flexShrink: 0 }}>
-        {/* 0행: 중심 좌표 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-          <span style={{ fontSize: 11, color: 'var(--text2)', flexShrink: 0 }}>종이 좌상단 좌표 (mm)</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 11, color: 'var(--text2)' }}>X</span>
-            <input type="number" step="1"
-              value={artSettings.originX}
-              onChange={e => upd('originX', parseFloat(e.target.value) || 0)}
-              disabled={isRunning}
-              style={{ width: 80 }} />
-            <span style={{ fontSize: 11, color: 'var(--text2)' }}>Y</span>
-            <input type="number" step="1"
-              value={artSettings.originY}
-              onChange={e => upd('originY', parseFloat(e.target.value) || 0)}
-              disabled={isRunning}
-              style={{ width: 80 }} />
-          </div>
-          <span style={{ fontSize: 11, color: 'var(--text2)' }}>
-            → 좌상단 기준으로 {artSettings.frameWidth}×{artSettings.frameHeight}mm 범위에 그림
-          </span>
-        </div>
         {/* 1행: 드롭다운 설정 */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 8 }}>
           <div>
@@ -446,21 +630,12 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
         <div style={{ display: 'flex', gap: 12 }}>
           <button className="btn-primary"
             style={{ flex: 2, padding: '13px', fontSize: 16, fontWeight: 800, letterSpacing: 1 }}
-            disabled={!imageFile || pixelData.length === 0 || isRunning}
-            onClick={() => onStartDrawing(pixelData, artSettings, imageFile?.name ?? 'image')}>
-            {isRunning && drawingState.message.includes('S자') ? '그리는 중...' : '▶ S자 시작'}
-          </button>
-          <button className="btn-outline"
-            style={{ flex: 2, padding: '13px', fontSize: 16, fontWeight: 800 }}
-            disabled={!imageFile || pixelData.length === 0 || isRunning}
-            onClick={() => onStartDrawing(pixelData, { ...artSettings, drawMode: 'concentric' }, imageFile?.name ?? 'image')}>
-            {isRunning && drawingState.message.includes('동심원') ? '그리는 중...' : '◎ 동심원 시작'}
-          </button>
-          <button className="btn-secondary"
-            style={{ flex: 2, padding: '13px', fontSize: 16, fontWeight: 800 }}
-            disabled={!imageFile || pixelData.length === 0 || isRunning}
-            onClick={() => onStartDrawing(pixelData, { ...artSettings, drawMode: 'contour' }, imageFile?.name ?? 'image')}>
-            {isRunning && drawingState.message.includes('등고선') ? '그리는 중...' : '〰 등고선 시작'}
+            disabled={isRunning}
+            onClick={() => {
+              if (!imageFile || pixelData.length === 0) return;
+              onStartDrawing(pixelData, artSettings, imageFile?.name ?? 'image');
+            }}>
+            {isRunning ? '그리는 중...' : '▶ 그리기 시작'}
           </button>
           <button className="btn-danger"
             style={{ flex: 1, padding: '13px', fontSize: 14 }}

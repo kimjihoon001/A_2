@@ -18,7 +18,8 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
-from dsr_msgs2.srv import ServoOff, SetRobotControl
+from std_msgs.msg import Float64MultiArray
+from dsr_msgs2.srv import ServoOff, SetRobotControl, GetRobotState
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from config import WS_HOST, WS_PORT, STATUS_INTERVAL_SEC, DEFAULT_CALIBRATION
@@ -56,9 +57,20 @@ class BridgeNode(Node):
                          'gripper_open', 'gripper_close', 'calibrate_z')
         }
 
-        # DSR 직접 서비스 클라이언트 (estop/release)
-        self._servo_off_client = self.create_client(ServoOff,         '/dsr01/system/servo_off')
-        self._servo_on_client  = self.create_client(SetRobotControl,  '/dsr01/system/set_robot_control')
+        # DSR 직접 서비스 클라이언트 (estop/release/연결확인)
+        self._servo_off_client = self.create_client(ServoOff,        '/dsr01/system/servo_off')
+        self._servo_on_client  = self.create_client(SetRobotControl, '/dsr01/system/set_robot_control')
+        self._state_client     = self.create_client(GetRobotState,   '/dsr01/system/get_robot_state')
+
+        # 연결 상태 폴링 (0.5초)
+        self._dsr_connected = False
+        self.create_timer(0.5, self._poll_connection)
+
+        # DSR 직접 토픽 구독 (joint/TCP 실시간)
+        self._joints = [0.0] * 6
+        self._tcp    = [0.0, 0.0, 0.0]
+        self.create_subscription(Float64MultiArray, '/dsr01/msg/joint_state',   self._on_joint, 10)
+        self.create_subscription(Float64MultiArray, '/dsr01/msg/current_posx',  self._on_posx,  10)
 
         # 상태/로그 구독 (robot_art_node →)
         self.create_subscription(String, '/robot_art/status', self._on_status, 10)
@@ -89,6 +101,17 @@ class BridgeNode(Node):
             return {'success': False, 'message': f'{name} 서비스 응답 없음 (타임아웃 {timeout}s)'}
         r = result_box[0]
         return {'success': r.success, 'message': r.message}
+
+    def _poll_connection(self):
+        self._dsr_connected = self._state_client.service_is_ready()
+
+    def _on_joint(self, msg: Float64MultiArray):
+        if len(msg.data) == 6:
+            self._joints = [round(v, 2) for v in msg.data]
+
+    def _on_posx(self, msg: Float64MultiArray):
+        if len(msg.data) >= 3:
+            self._tcp = [round(msg.data[0], 2), round(msg.data[1], 2), round(msg.data[2], 2)]
 
     def call_estop(self, timeout: float = 5.0) -> dict:
         if not self._servo_off_client.wait_for_service(timeout_sec=timeout):
@@ -123,8 +146,7 @@ class BridgeNode(Node):
             data = json.loads(msg.data)
             _last_status = data
             _last_status_time = time.time()
-            if _loop:
-                asyncio.run_coroutine_threadsafe(broadcast(data), _loop)
+            # _status_broadcast_loop이 주기적으로 전송하므로 여기선 캐시만 갱신
         except Exception:
             pass
 
@@ -146,9 +168,10 @@ def _node_online() -> bool:
     return _last_status_time > 0 and (time.time() - _last_status_time) < _NODE_TIMEOUT
 
 def _current_robot_state() -> dict:
-    """최신 robot 상태 반환. node 오프라인이면 ros2/connected를 False로 override."""
+    """최신 robot 상태 반환. DSR 서비스 응답 여부로 연결 상태 직접 판단."""
     robot = _last_status.get("robot", {}) if _last_status else {}
-    if not _node_online():
+    dsr_connected = _bridge is not None and _bridge._dsr_connected
+    if not dsr_connected:
         robot = {**robot, "ros2": False, "connected": False, "powered": False}
     return robot
 
@@ -162,6 +185,38 @@ def _ros_spin():
         executor.spin()
     except Exception:
         pass
+
+
+# ── 상태 주기 브로드캐스트 ──────────────────────────────────────
+async def _status_broadcast_loop():
+    while True:
+        await asyncio.sleep(STATUS_INTERVAL_SEC)
+        if not _clients:
+            continue
+
+        dsr_connected = _bridge._dsr_connected if _bridge else False
+
+        # robot 상태 조립 — DSR 직접 값 우선
+        robot = _last_status.get("robot", {}) if _last_status else {}
+        if _bridge:
+            robot = {
+                **robot,
+                "connected"    : dsr_connected,
+                "powered"      : dsr_connected,
+                "ros2"         : dsr_connected,
+                "joints"       : _bridge._joints,
+                "tcpX"         : _bridge._tcp[0],
+                "tcpY"         : _bridge._tcp[1],
+                "tcpZ"         : _bridge._tcp[2],
+            }
+
+        status_data = {
+            **(_last_status or {}),
+            "type"      : "status",
+            "nodeOnline": dsr_connected,
+            "robot"     : robot,
+        }
+        await broadcast(status_data)
 
 
 # ── WebSocket 브로드캐스트 ───────────────────────────────────────
@@ -193,6 +248,8 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_ros_spin, daemon=True, name="RosBridge").start()
     log.info("ROS2 브리지 노드 시작")
     log.info(f"서버 시작 — ws://{WS_HOST}:{WS_PORT}/ws")
+
+    asyncio.get_event_loop().create_task(_status_broadcast_loop())
 
     yield
 

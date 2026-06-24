@@ -70,6 +70,7 @@ class RobotArtNode(Node):
 
         # ── 구독자 ─────────────────────────────────────────────
         self._pending: dict = {}
+        self._pending_lock = threading.Lock()
         self.create_subscription(String, '/robot_art/pixels', self._on_pixels, 10)
 
         # ── 서비스 ─────────────────────────────────────────────
@@ -93,17 +94,20 @@ class RobotArtNode(Node):
     # ── 픽셀 수신 ────────────────────────────────────────────────
     def _on_pixels(self, msg: String):
         try:
-            self._pending = json.loads(msg.data)
-            n = len(self._pending.get('pixels', []))
+            data = json.loads(msg.data)
+            n = len(data.get('pixels', []))
+            with self._pending_lock:
+                self._pending = data
             self.get_logger().info(f'픽셀 수신: {n:,}개')
         except Exception as e:
             self.get_logger().error(f'픽셀 파싱 오류: {e}')
 
     # ── 서비스 핸들러 ────────────────────────────────────────────
     def _svc_start(self, req, res):
-        pixels     = self._pending.get('pixels', [])
-        settings   = self._pending.get('settings', {})
-        image_name = self._pending.get('imageName', 'image')
+        with self._pending_lock:
+            pixels     = self._pending.get('pixels', [])
+            settings   = self._pending.get('settings', {})
+            image_name = self._pending.get('imageName', 'image')
         if not pixels:
             res.success = False
             res.message = '픽셀 없음 — /robot_art/pixels 먼저 발행하세요'
@@ -165,9 +169,10 @@ class RobotArtNode(Node):
             return res
         try:
             calib    = self.db.get_active_calibration() or DEFAULT_CALIBRATION
-            origin_x = float(calib.get('origin_x', 463.94))
-            origin_y = float(calib.get('origin_y', 171.03))
+            origin_x = float(calib.get('origin_x') or 356.0)
+            origin_y = float(calib.get('origin_y') or -41.0)
             result   = self.robot.auto_calibrate_z(origin_x, origin_y)
+            self.db.update_calibration_z(result['pen_up_z'], result['pen_down_z'])
             res.success = True
             res.message = json.dumps(result)
         except Exception as e:

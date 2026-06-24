@@ -128,15 +128,17 @@ export interface ArtSettings {
   dryRun: boolean;
   originX: number;
   originY: number;
-  drawMode?: 'snake' | 'concentric' | 'contour';
+  drawMode?: 'snake' | 'contour';
 }
 
 export interface CalibrationData {
-  origin_x: number;
-  origin_y: number;
+  origin_x: number;   // S자 좌상단 X
+  origin_y: number;   // S자 좌상단 Y
   origin_z: number;
   pen_down_z: number;
   pixel_spacing_mm: number;
+  center_x: number;
+  center_y: number;
   canvas_width_mm?: number;
   canvas_height_mm?: number;
   name?: string;

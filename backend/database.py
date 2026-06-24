@@ -1,3 +1,4 @@
+
 # ================================================================
 # database.py — SQLite 데이터베이스
 # ================================================================
@@ -64,6 +65,8 @@ class Database:
                     pixel_spacing_mm  REAL,
                     canvas_width_mm   REAL,
                     canvas_height_mm  REAL,
+                    center_x          REAL,
+                    center_y          REAL,
                     is_active         INTEGER DEFAULT 0,
                     created_at        TEXT    DEFAULT (datetime('now','localtime'))
                 );
@@ -180,6 +183,14 @@ class Database:
                 data.get("canvas_width_mm"), data.get("canvas_height_mm"),
             ))
             return cur.lastrowid
+
+    def update_calibration_z(self, pen_up_z: float, pen_down_z: float):
+        """활성 캘리브레이션의 Z값만 현재 레코드에 업데이트."""
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE calibration SET origin_z=?, pen_down_z=? WHERE is_active=1",
+                (pen_up_z, pen_down_z),
+            )
 
     def get_active_calibration(self) -> dict | None:
         with self._conn() as conn:

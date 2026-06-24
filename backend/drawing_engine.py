@@ -17,87 +17,15 @@ log = logging.getLogger(__name__)
 
 def _gray_to_force(gray: int) -> float | None:
     """
-    계단식 회색값 → 힘 매핑 (10 N ~ 3 N, 4단계).
-    0~50   → 10 N  (검정)
-    51~100 →  7 N
-    101~150→  5 N
-    151~200→  3 N  (연회색)
-    201~255→ None  (스킵)
+    회색값 → 힘 매핑 (모드별 분리).
+    pixel(S자): 점 찍기 — 6/5.5/5/4 N
+    contour(선 그리기): 6/5.5/5/4 N
     """
-    if   gray <=  50: return 10.0
-    elif gray <= 100: return  7.0
-    elif gray <= 150: return  5.0
-    elif gray <= 200: return  3.0
-    else:             return  None
-
-
-def _build_concentric_path(pixels: list[dict], calibration: dict,
-                           settings: dict | None = None) -> list[dict]:
-    """
-    동심원 패턴 경로: 이미지 중심에서 바깥으로 원호를 그리며
-    명암(gray)에 따라 펜 다운/업 결정.
-    """
-    import math
-
-    if not pixels:
-        return []
-
-    width  = max(p["x"] for p in pixels) + 1
-    height = max(p["y"] for p in pixels) + 1
-    grid: dict[tuple, int] = {(p["x"], p["y"]): p["gray"] for p in pixels}
-
-    z_up = float(calibration.get("origin_z") or 270.80)
-    z_dn = float(calibration.get("pen_down_z") or 265.80)
-
-    use_origin = (
-        settings and
-        "originX" in settings and "originY" in settings and
-        settings.get("frameWidth") and settings.get("frameHeight") and
-        settings.get("resWidth")   and settings.get("resHeight")
-    )
-    if use_origin:
-        ox          = float(settings["originX"])
-        oy          = float(settings["originY"])
-        mm_per_px_x = float(settings["frameWidth"])  / float(settings["resWidth"])
-        mm_per_px_y = float(settings["frameHeight"]) / float(settings["resHeight"])
-    else:
-        ox = float(calibration.get("origin_x") or 436.80)
-        oy = float(calibration.get("origin_y") or 157.38)
-        mm_per_px_x = float(calibration.get("pixel_spacing_mm") or 4.0)
-        mm_per_px_y = mm_per_px_x
-
-    cx = (width  - 1) / 2.0
-    cy = (height - 1) / 2.0
-    max_r = math.sqrt((width / 2) ** 2 + (height / 2) ** 2)
-
-    path = []
-    r = 1.0
-    while r <= max_r:
-        n_pts = max(8, int(2 * math.pi * r * 1.5))
-        for i in range(n_pts):
-            angle = 2 * math.pi * i / n_pts
-            fpx = cx + r * math.cos(angle)
-            fpy = cy + r * math.sin(angle)
-            px  = int(round(fpx))
-            py  = int(round(fpy))
-            if px < 0 or px >= width or py < 0 or py >= height:
-                continue
-            gray  = grid.get((px, py), 255)
-            force = _gray_to_force(gray)
-            if force is None:
-                continue
-            path.append({
-                "rx"  : ox + fpx * mm_per_px_x,
-                "ry"  : oy + fpy * mm_per_px_y,
-                "z_up": z_up,
-                "z_dn": z_dn,
-                "gray": gray,
-                "px"  : px,
-                "py"  : py,
-            })
-        r += 1.0
-
-    return path
+    if   gray <=  50: return 6.0
+    elif gray <= 100: return 5.5
+    elif gray <= 150: return 5.0
+    elif gray <= 200: return 4.0
+    else:             return None
 
 
 def _build_contour_segments(pixels: list[dict], calibration: dict,
@@ -117,27 +45,23 @@ def _build_contour_segments(pixels: list[dict], calibration: dict,
     for p in pixels:
         grid[p["y"]][p["x"]] = p["gray"]
 
-    z_up = float(calibration.get("origin_z") or 270.80)
-    z_dn = float(calibration.get("pen_down_z") or 265.80)
+    z_up = float(calibration.get("origin_z") or 436.88)
+    z_dn = float(calibration.get("pen_down_z") or 435.88)
 
-    use_origin = (
-        settings and
-        "originX" in settings and "originY" in settings and
-        settings.get("frameWidth") and settings.get("resWidth")
-    )
-    if use_origin:
-        ox   = float(settings["originX"])
-        oy   = float(settings["originY"])
+    ox = float(calibration.get("origin_x") or 356.0)
+    oy = float(calibration.get("origin_y") or -41.0)
+    if settings and settings.get("frameWidth") and settings.get("resWidth"):
         mm_x = float(settings["frameWidth"])  / float(settings["resWidth"])
         mm_y = float(settings["frameHeight"]) / float(settings["resHeight"])
     else:
-        ox   = float(calibration.get("origin_x") or 436.80)
-        oy   = float(calibration.get("origin_y") or 157.38)
-        mm_x = float(calibration.get("pixel_spacing_mm") or 4.0)
+        mm_x = float(calibration.get("pixel_spacing_mm") or 2.0)
         mm_y = mm_x
 
+    cx_img = width  / 2.0
+    cy_img = height / 2.0
+
     def to_robot(px: float, py: float) -> tuple[float, float]:
-        return ox + px * mm_x, oy + py * mm_y
+        return ox - (py - cy_img) * mm_y, oy - (px - cx_img) * mm_x
 
     # Marching Squares: TL=8, TR=4, BR=2, BL=1 (1 = gray < level = dark)
     MS_TABLE = {
@@ -244,26 +168,17 @@ def _build_path(pixels: list[dict], calibration: dict,
 
     grid: dict[tuple, int] = {(p["x"], p["y"]): p["gray"] for p in pixels}
 
-    z_up = float(calibration.get("origin_z") or 270.80)
-    z_dn = float(calibration.get("pen_down_z") or 265.80)
+    z_up = float(calibration.get("origin_z") or 436.88)
+    z_dn = float(calibration.get("pen_down_z") or 435.88)
 
-    # 중심 좌표 방식 vs 원점+간격 방식
-    use_origin = (
-        settings and
-        "originX" in settings and "originY" in settings and
-        settings.get("frameWidth") and settings.get("frameHeight") and
-        settings.get("resWidth")   and settings.get("resHeight")
-    )
-
-    if use_origin:
-        ox          = float(settings["originX"])
-        oy          = float(settings["originY"])
+    # S자 모드: origin_x/y = 종이 좌상단 절대좌표
+    ox = float(calibration.get("origin_x") or 461.0)
+    oy = float(calibration.get("origin_y") or 33.0)
+    if settings and settings.get("frameWidth") and settings.get("resWidth"):
         mm_per_px_x = float(settings["frameWidth"])  / float(settings["resWidth"])
         mm_per_px_y = float(settings["frameHeight"]) / float(settings["resHeight"])
     else:
-        ox = float(calibration.get("origin_x") or 436.80)
-        oy = float(calibration.get("origin_y") or 157.38)
-        mm_per_px_x = float(calibration.get("pixel_spacing_mm") or 4.0)
+        mm_per_px_x = float(calibration.get("pixel_spacing_mm") or 2.0)
         mm_per_px_y = mm_per_px_x
 
     path = []
@@ -273,8 +188,9 @@ def _build_path(pixels: list[dict], calibration: dict,
             gray = grid.get((x, y), 255)
             if _gray_to_force(gray) is None:
                 continue
-            rx = ox + x * mm_per_px_x
-            ry = oy + y * mm_per_px_y
+            # 좌상단 기준 절대좌표: top→down = X-, left→right = Y-
+            rx = ox - y * mm_per_px_y
+            ry = oy - x * mm_per_px_x
             path.append({
                 "rx"  : rx,
                 "ry"  : ry,
@@ -375,11 +291,7 @@ class DrawingEngine:
             self._run_contour(pixels, calib, settings, dry_run)
             return
 
-        # 경로 생성
-        if settings.get("drawMode") == "concentric":
-            path = _build_concentric_path(pixels, calib, settings=settings)
-        else:
-            path = _build_path(pixels, calib, settings=settings)
+        path = _build_path(pixels, calib, settings=settings)
 
         self.status        = "running"
         self.total_pixels  = len(path)
@@ -391,12 +303,6 @@ class DrawingEngine:
             self._emit_log("건식 실행 모드 — 실제 이동 없음", "WARNING")
 
         try:
-            if not dry_run and path:
-                # 준비 자세로 이동 (특이점 회피)
-                self._emit_log("준비 자세로 이동 중...")
-                self.robot.movej(READY_JOINTS, vel=READY_VEL, acc=READY_ACC)
-                self._emit_log("준비 자세 완료")
-
             for i, step in enumerate(path):
                 # 중단 요청 확인
                 if self._stop_evt.is_set():
@@ -449,11 +355,6 @@ class DrawingEngine:
             self._emit_log("건식 실행 모드 — 실제 이동 없음", "WARNING")
 
         try:
-            if not dry_run and segments:
-                self._emit_log("준비 자세로 이동 중...")
-                self.robot.movej(READY_JOINTS, vel=READY_VEL, acc=READY_ACC)
-                self._emit_log("준비 자세 완료")
-
             for i, seg in enumerate(segments):
                 if self._stop_evt.is_set():
                     self._finish("cancelled", i)

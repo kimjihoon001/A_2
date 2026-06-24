@@ -147,7 +147,6 @@ export default function App() {
       alarmsRef.current('info', 'Python 서버 연결됨');
       setConn(c => ({
         ...c,
-        status: connInfo?.protocol === 'ROS2' ? 'connected' : 'disconnected',
         lastConnect: new Date().toLocaleTimeString('ko-KR'),
         ...(connInfo && { ip: connInfo.ip, port: connInfo.port, protocol: connInfo.protocol }),
       }));
@@ -158,13 +157,17 @@ export default function App() {
     },
     onCalibrateZResult: (data) => {
       setCalibratedZ(data);
-      addLog(`[Z 자동측정] 접촉=${data.contact_z}mm → pen_up=${data.pen_up_z}, pen_down=${data.pen_down_z}`);
+      addLog(`[Z 자동측정] 접촉=${data.contact_z}mm → pen_up=${data.pen_up_z}, pen_down=${data.pen_down_z} (자동 저장됨)`);
     },
   });
 
   const serverConnected = server.connected;
   const ros2Connected   = serverConnected && robotState.ros2 === true;
   const robotConnected  = ros2Connected;
+
+  useEffect(() => {
+    setConn(c => ({ ...c, status: robotConnected ? 'connected' : 'disconnected' }));
+  }, [robotConnected]);
 
   // ── E-STOP ──────────────────────────────────────────────────
   function handleEstop() {
@@ -371,6 +374,7 @@ export default function App() {
         history={history}
         alarms={alarms}
         drawingState={drawingState}
+        ros2Connected={ros2Connected}
       />
     ),
     drawing: (
