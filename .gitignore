@@ -1,1 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+
+# DB (실측 데이터 제외)
+backend/data/*.db
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# ROS2 build
+ws_edu/build/
+ws_edu/install/
+ws_edu/log/
+
+# IDE
 .vscode/
