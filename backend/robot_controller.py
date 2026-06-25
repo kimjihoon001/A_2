@@ -72,7 +72,7 @@ def _read_dsr_robot_params() -> tuple[str, int]:
     """dsr_hardware2 config YAML 파일에서 robot host/port를 읽어 반환. 실패 시 config.py 값 사용."""
     try:
         import glob
-        pattern = f"/home/jihoon/ws_cobot_pjt/ws_edu/install/dsr_hardware2/share/dsr_hardware2/config/{ROBOT_ID}_parameters.yaml"
+        pattern = f"/home/rokey/ws_cobot_pjt/ws_edu/install/dsr_hardware2/share/dsr_hardware2/config/{ROBOT_ID}_parameters.yaml"
         matches = glob.glob(pattern)
         if not matches:
             raise FileNotFoundError(f"파라미터 파일 없음: {pattern}")
@@ -930,6 +930,24 @@ class RobotController:
             movel(pos_lowframe_start, vel=20, acc=50)
             time.sleep(0.1)
             self.gripper_close()
+
+            current_width = self.state.gripper_width
+
+            if current_width < 7.0:
+                log.error(f"액자 누락 감지! 현재 폭: {current_width}mm")
+
+                # 1. 로봇 정지 및 안전 위치 복귀
+                self.gripper_open()
+                movej(home_pos, vel=30, acc=50) # 홈 위치로 복귀 (안전 확보)
+                
+                # 2. HMI(프론트엔드)로 보낼 상태 업데이트
+                with self._lock:
+                    self.state.status = "ERROR" # 상태를 에러로 변경
+                    self.state.error_message = "액자가 소진되었습니다. 액자를 보충하고 확인 버튼을 눌러주세요."
+                
+                # 3. 현재 진행 중인 작업 함수 강제 종료
+                raise RuntimeError("액자 누락 에러 발생")
+
             time.sleep(0.1)
             movel(pos_lowframe_start_hoverx, vel=20, acc=50)
             time.sleep(0.1)

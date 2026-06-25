@@ -8,12 +8,18 @@
 // ================================================================
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import type { PixelPoint, ArtSettings, RobotState } from '../types';
+import type { PixelPoint, ArtSettings} from '../types';
 
 export interface RobotConnInfo {
   ip: string;
   port: number;
   protocol: string;
+}
+
+export interface RobotState {
+  status: 'IDLE' | 'RUNNING' | 'ERROR'; // 에러 상태 추가
+  error_message?: string;               // 에러 메시지 추가
+  // ... 기존 상태들
 }
 
 export interface CalibrateZResult {
