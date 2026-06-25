@@ -76,11 +76,15 @@ class RobotArtNode(Node):
         # ── 서비스 ─────────────────────────────────────────────
         self.create_service(Trigger, '/robot_art/start',          self._svc_start)
         self.create_service(Trigger, '/robot_art/stop',           self._svc_stop)
+        self.create_service(Trigger, '/robot_art/pause',          self._svc_pause)
+        self.create_service(Trigger, '/robot_art/resume',         self._svc_resume)
         self.create_service(Trigger, '/robot_art/estop',          self._svc_estop)
         self.create_service(Trigger, '/robot_art/release_estop',  self._svc_release_estop)
         self.create_service(Trigger, '/robot_art/home',           self._svc_home)
         self.create_service(Trigger, '/robot_art/gripper_open',   self._svc_gripper_open)
         self.create_service(Trigger, '/robot_art/gripper_close',  self._svc_gripper_close)
+        self.create_service(Trigger, '/robot_art/pencil_grip',    self._svc_pencil_grip)
+        self.create_service(Trigger, '/robot_art/pencil_release', self._svc_pencil_release)
         self.create_service(Trigger, '/robot_art/calibrate_z',    self._svc_calibrate_z)
         self.create_service(Trigger, '/robot_art/frame_task',     self._svc_frame_task)
 
@@ -128,6 +132,18 @@ class RobotArtNode(Node):
         res.message = '그리기 중단'
         return res
 
+    def _svc_pause(self, req, res):
+        self.engine.pause()
+        res.success = True
+        res.message = '일시정지'
+        return res
+
+    def _svc_resume(self, req, res):
+        self.engine.resume()
+        res.success = True
+        res.message = '재개'
+        return res
+
     def _svc_estop(self, req, res):
         self.engine.stop()
         threading.Thread(target=self.robot.emergency_stop, daemon=True).start()
@@ -161,6 +177,26 @@ class RobotArtNode(Node):
         threading.Thread(target=self.robot.gripper_close, daemon=True).start()
         res.success = True
         res.message = '그리퍼 닫기'
+        return res
+
+    def _svc_pencil_grip(self, req, res):
+        if self.engine.is_running():
+            res.success = False
+            res.message = '그리기 중에는 연필 파지 불가'
+            return res
+        threading.Thread(target=self.robot.pencil_grip, daemon=True).start()
+        res.success = True
+        res.message = '연필 파지 시작'
+        return res
+
+    def _svc_pencil_release(self, req, res):
+        if self.engine.is_running():
+            res.success = False
+            res.message = '그리기 중에는 연필 반납 불가'
+            return res
+        threading.Thread(target=self.robot.pencil_release, daemon=True).start()
+        res.success = True
+        res.message = '연필 반납 시작'
         return res
 
     def _svc_frame_task(self, req, res):

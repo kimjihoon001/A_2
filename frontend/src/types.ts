@@ -122,7 +122,6 @@ export interface ArtSettings {
   penForceMin: number;
   penForceMax: number;
   dryRun: boolean;
-  drawMode?: 'snake' | 'contour';
 }
 
 export interface CalibrationData {
@@ -130,6 +129,7 @@ export interface CalibrationData {
   origin_y: number;   // S자 좌상단 Y
   origin_z: number;
   pen_down_z: number;
+  travel_z?: number;
   pixel_spacing_mm: number;
   center_x: number;
   center_y: number;

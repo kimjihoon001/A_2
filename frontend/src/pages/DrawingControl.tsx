@@ -50,11 +50,6 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
           )}
         </div>
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 160 }}>
-          <button className="btn-primary" disabled={isActive}
-            style={{ width: '100%' }}
-            onClick={() => addLog('[관리자] 그리기 화면 — 시작은 손님 화면에서')}>
-            시작
-          </button>
           <button className="btn-outline" disabled={!isRunning}
             style={{ width: '100%' }}
             onClick={() => { onPause(); addLog('[관리자] 일시정지'); }}>

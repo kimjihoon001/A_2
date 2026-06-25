@@ -72,7 +72,7 @@ def _read_dsr_robot_params() -> tuple[str, int]:
     """dsr_hardware2 config YAML 파일에서 robot host/port를 읽어 반환. 실패 시 config.py 값 사용."""
     try:
         import glob
-        pattern = f"/home/rokey/ws_cobot_pjt/ws_edu/install/dsr_hardware2/share/dsr_hardware2/config/{ROBOT_ID}_parameters.yaml"
+        pattern = f"/home/kimjihoon/ws_cobot_pjt/ws_edu/install/dsr_hardware2/share/dsr_hardware2/config/{ROBOT_ID}_parameters.yaml"
         matches = glob.glob(pattern)
         if not matches:
             raise FileNotFoundError(f"파라미터 파일 없음: {pattern}")
@@ -909,9 +909,8 @@ class RobotController:
             movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
             if self.state.estop: return
             movel(pos_home, vel=[100, 100], acc=[50, 50], mod=0)
-            # 드로잉 방향(0, 180, 0)으로 손목 미리 정렬 — 이후 movel 시 117° 스핀 방지
-            pos_home_aligned = posx(526.83, 54.46, 506.64, 0, 180, 0)
-            movel(pos_home_aligned, vel=[50, 30], acc=[50, 30])
+            # pos_home_aligned = posx(526.83, 54.46, 506.64, 0, 180, 0)
+            # movel(pos_home_aligned, vel=[50, 30], acc=[50, 30])
             log.info("연필 홈 이동 완료")
             return
 

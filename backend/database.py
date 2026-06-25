@@ -62,6 +62,7 @@ class Database:
                     origin_y          REAL,
                     origin_z          REAL,
                     pen_down_z        REAL,
+                    travel_z          REAL,
                     pixel_spacing_mm  REAL,
                     canvas_width_mm   REAL,
                     canvas_height_mm  REAL,
@@ -78,6 +79,11 @@ class Database:
                     updated_at  TEXT DEFAULT (datetime('now','localtime'))
                 );
             """)
+        # 기존 DB 마이그레이션: travel_z 컬럼 없으면 추가
+        with self._conn() as conn:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(calibration)").fetchall()]
+            if "travel_z" not in cols:
+                conn.execute("ALTER TABLE calibration ADD COLUMN travel_z REAL")
         self._seed_settings()
         self._seed_calibration()
 
@@ -88,6 +94,8 @@ class Database:
         'log_retention_days':    (1,    365),
         'skip_threshold':        (0,    255),
         'gripper_default_force': (1,    120),
+        'pen_force_min':         (0.1,   80),
+        'pen_force_max':         (0.1,   80),
     }
 
     def _seed_settings(self):
@@ -99,6 +107,8 @@ class Database:
             ("skip_threshold",       "245",  "스킵할 그레이값 상한 (0~255)"),
             ("gripper_default_force","20",   "그리퍼 기본 파지력 (N)"),
             ("robot_ip",             "192.168.1.100", "M0609 IP 주소"),
+            ("pen_force_min",        "3.0",  "펜 최소 힘 (N) — 밝은 픽셀"),
+            ("pen_force_max",        "8.0",  "펜 최대 힘 (N) — 어두운 픽셀"),
         ]
         with self._conn() as conn:
             conn.executemany(
@@ -114,9 +124,9 @@ class Database:
             conn.execute("""
                 INSERT INTO calibration
                     (name, origin_x, origin_y, origin_z,
-                     pen_down_z, pixel_spacing_mm,
+                     pen_down_z, travel_z, pixel_spacing_mm,
                      canvas_width_mm, canvas_height_mm, is_active)
-                VALUES ('default', 462.0, -16.0, 360.58, 359.58, 2.0, 210.0, 148.0, 1)
+                VALUES ('default', 462.0, -16.0, 360.58, 359.58, 408.0, 2.0, 210.0, 148.0, 1)
             """)
 
     # ── Jobs ────────────────────────────────────────────────────
@@ -197,13 +207,14 @@ class Database:
             cur = conn.execute("""
                 INSERT INTO calibration
                     (name, origin_x, origin_y, origin_z,
-                     pen_down_z, pixel_spacing_mm,
+                     pen_down_z, travel_z, pixel_spacing_mm,
                      canvas_width_mm, canvas_height_mm, is_active)
-                VALUES (?,?,?,?,?,?,?,?,1)
+                VALUES (?,?,?,?,?,?,?,?,?,1)
             """, (
                 data.get("name", "default"),
                 data.get("origin_x"), data.get("origin_y"), data.get("origin_z"),
-                data.get("pen_down_z"), data.get("pixel_spacing_mm"),
+                data.get("pen_down_z"), data.get("travel_z"),
+                data.get("pixel_spacing_mm"),
                 data.get("canvas_width_mm"), data.get("canvas_height_mm"),
             ))
             return cur.lastrowid

@@ -14,6 +14,8 @@ interface Props {
   onSetRobotMode?:  (mode: number) => void;
   onGripperOpen?:   () => void;
   onGripperClose?:  () => void;
+  onPencilGrip?:    () => void;
+  onPencilRelease?: () => void;
 }
 
 const BASE_X = 462.0;
@@ -36,10 +38,11 @@ function Row({ label, value, unit }: { label: string; value: string | number; un
 export default function CalibrationPage({
   robotState, addLog, onGoHome, onSaveCalibration, savedCalib,
   onJogStart, onJogStop, onJogMultiStart, onJogMultiStop, onSetRobotMode,
-  onGripperOpen, onGripperClose,
+  onGripperOpen, onGripperClose, onPencilGrip, onPencilRelease,
 }: Props) {
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
+  const [travelZ, setTravelZ] = useState(408.0);
   const [step, setStep]       = useState<Step>(1);
   const [saved, setSaved]     = useState(false);
   const [jogSpeed, setJogSpeed]   = useState<number>(20);
@@ -51,6 +54,7 @@ export default function CalibrationPage({
     if (savedCalib) {
       setOffsetX(parseFloat(((savedCalib.origin_x ?? BASE_X) - BASE_X).toFixed(2)));
       setOffsetY(parseFloat(((savedCalib.origin_y ?? BASE_Y) - BASE_Y).toFixed(2)));
+      setTravelZ(savedCalib.travel_z ?? 408.0);
     }
   }, [savedCalib]);
 
@@ -64,6 +68,7 @@ export default function CalibrationPage({
       ...(savedCalib ?? { origin_z: 0, pen_down_z: 0, pixel_spacing_mm: 2.0, center_x: 0, center_y: 0 }),
       origin_x: parseFloat((BASE_X + offsetX).toFixed(2)),
       origin_y: parseFloat((BASE_Y + offsetY).toFixed(2)),
+      travel_z: travelZ,
     };
     onSaveCalibration(data);
     setSaved(true);
@@ -213,10 +218,24 @@ export default function CalibrationPage({
             </button>
           </div>
           <div className="card">
-            <div className="card-title">Z</div>
-            <div style={{ padding: '8px 10px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
-              Z 높이는 그리기 시작 시 첫 픽셀 위치에서 자동 측정됩니다
+            <div className="card-title">이동 Z (travel_z)</div>
+            <div style={{ marginBottom: 10, fontSize: 12, color: 'var(--text2)' }}>
+              첫 픽셀로 이동할 때 사용하는 높이. Z 자동측정 전 접근 높이.
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <button className="btn-ghost" style={btnAdj} onClick={() => setTravelZ(v => parseFloat((v - 1).toFixed(2)))}>−</button>
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent)' }}>{travelZ.toFixed(2)}</span>
+                <span style={{ fontSize: 13, color: 'var(--text2)', marginLeft: 4 }}>mm</span>
+              </div>
+              <button className="btn-ghost" style={btnAdj} onClick={() => setTravelZ(v => parseFloat((v + 1).toFixed(2)))}>+</button>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>
+              현재 Z 자동측정 높이: {savedCalib?.origin_z?.toFixed(2) ?? '-'} mm
+            </div>
+            <button className={saved ? 'btn-success' : 'btn-primary'} style={{ width: '100%' }} onClick={saveCalib}>
+              {saved ? '✓ 저장됨' : 'travel_z 저장'}
+            </button>
           </div>
         </div>
       </div>
@@ -315,6 +334,14 @@ export default function CalibrationPage({
             <button className="btn-outline" style={{ flex: 1 }}
               onMouseDown={() => onGripperClose?.()} onTouchStart={() => onGripperClose?.()}>
               그리퍼 닫기
+            </button>
+            <button className="btn-primary" style={{ flex: 1 }}
+              onClick={() => onPencilGrip?.()}>
+              연필 파지
+            </button>
+            <button className="btn-ghost" style={{ flex: 1 }}
+              onClick={() => onPencilRelease?.()}>
+              연필 반납
             </button>
           </div>
         </div>

@@ -211,11 +211,11 @@ export default function App() {
 
   // ── 일시정지 / 재개 ─────────────────────────────────────────
   function handlePause() {
-    setDrawingState(s => s.status === 'running' ? { ...s, status: 'paused' } : s);
+    if (serverConnected) server.pause();
     addLog('그리기 일시정지');
   }
   function handleResume() {
-    setDrawingState(s => s.status === 'paused' ? { ...s, status: 'running' } : s);
+    if (serverConnected) server.resume();
     addLog('그리기 재개');
   }
 
@@ -261,26 +261,6 @@ export default function App() {
 
 
   // ── 렌더 분기 ─────────────────────────────────────────────────
-  if (mode === 'customer') {
-    return (
-      <CustomerScreen
-        drawingState={drawingState}
-        onStartDrawing={handleStartDrawing}
-        onCancelDrawing={handleCancelDrawing}
-        onAdminClick={() => setMode('login')}
-      />
-    );
-  }
-
-  if (mode === 'login') {
-    return (
-      <LoginScreen
-        onLogin={u => { setUser(u); setMode('admin'); addLog(`로그인: ${u.name} (${u.role})`); }}
-        onBack={() => setMode('customer')}
-      />
-    );
-  }
-
   const activeAlarms = alarms.filter(a => a.level === 'error').length;
 
   const pages: Record<string, React.ReactNode> = {
@@ -324,6 +304,8 @@ export default function App() {
         onSetRobotMode={(mode) => { if (serverConnected) server.setRobotMode(mode); }}
         onGripperOpen={() => { if (serverConnected) server.gripperOpen(); addLog('[관리자] 그리퍼 열기'); }}
         onGripperClose={() => { if (serverConnected) server.gripperClose(); addLog('[관리자] 그리퍼 닫기'); }}
+        onPencilGrip={() => { if (serverConnected) server.pencilGrip(); addLog('[관리자] 연필 파지 시작'); }}
+        onPencilRelease={() => { if (serverConnected) server.pencilRelease(); addLog('[관리자] 연필 반납 시작'); }}
       />
     ),
     safety: (
@@ -355,6 +337,8 @@ export default function App() {
           move_speed:         String(s.maxSpeed),
           dot_hold_ms:        String(s.dotHoldMs),
           log_retention_days: String(s.logRetention),
+          pen_force_min:      String(s.minForce),
+          pen_force_max:      String(s.maxForce),
           hmi_settings:       JSON.stringify(s),
         });
       }} addLog={addLog} />
@@ -365,15 +349,36 @@ export default function App() {
   };
 
   return (
-    <Layout
-      user={user!}
-      activeTab={activeTab}
-      setActiveTab={setActiveTab}
-      onLogout={() => { addLog(`로그아웃: ${user?.name}`); setUser(null); setMode('customer'); setActiveTab('dashboard'); }}
-      alarmCount={activeAlarms}
-      serverConnected={serverConnected}
-    >
-      {pages[activeTab] ?? pages.dashboard}
-    </Layout>
+    <>
+      {/* CustomerScreen은 항상 같은 트리 위치에 마운트 유지, 비활성 시만 숨김 */}
+      <div style={{ display: mode === 'customer' ? 'block' : 'none' }}>
+        <CustomerScreen
+          drawingState={drawingState}
+          onStartDrawing={handleStartDrawing}
+          onCancelDrawing={handleCancelDrawing}
+          onAdminClick={() => setMode('login')}
+        />
+      </div>
+
+      {mode === 'login' && (
+        <LoginScreen
+          onLogin={u => { setUser(u); setMode('admin'); addLog(`로그인: ${u.name} (${u.role})`); }}
+          onBack={() => setMode('customer')}
+        />
+      )}
+
+      {mode === 'admin' && (
+        <Layout
+          user={user!}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onLogout={() => { addLog(`로그아웃: ${user?.name}`); setUser(null); setMode('customer'); setActiveTab('dashboard'); }}
+          alarmCount={activeAlarms}
+          serverConnected={serverConnected}
+        >
+          {pages[activeTab] ?? pages.dashboard}
+        </Layout>
+      )}
+    </>
   );
 }

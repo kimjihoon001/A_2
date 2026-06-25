@@ -53,8 +53,8 @@ class BridgeNode(Node):
         # 서비스 클라이언트 (robot_art_node 경유)
         self._svc = {
             name: self.create_client(Trigger, f'/robot_art/{name}')
-            for name in ('start', 'stop', 'home',
-                         'gripper_open', 'gripper_close', 'calibrate_z', 'frame_task')
+            for name in ('start', 'stop', 'pause', 'resume', 'home',
+                         'gripper_open', 'gripper_close', 'pencil_grip', 'pencil_release', 'calibrate_z', 'frame_task')
         }
 
         # DSR 직접 서비스 클라이언트 (estop/release/연결확인)
@@ -324,6 +324,14 @@ async def handle_command(ws: WebSocket, msg: dict):
         level = "INFO" if result['success'] else "ERROR"
         await ws.send_text(json.dumps({"type": "log", "level": level, "message": result['message']}))
 
+    elif cmd == "pause":
+        result = await asyncio.to_thread(_bridge.call_service, 'pause')
+        await broadcast({"type": "log", "level": "INFO", "message": result['message']})
+
+    elif cmd == "resume":
+        result = await asyncio.to_thread(_bridge.call_service, 'resume')
+        await broadcast({"type": "log", "level": "INFO", "message": result['message']})
+
     elif cmd == "stop":
         result = await asyncio.to_thread(_bridge.call_service, 'stop')
         db.add_log("그리기 중단 요청 (HMI)", "WARNING")
@@ -351,6 +359,16 @@ async def handle_command(ws: WebSocket, msg: dict):
     elif cmd == "gripper_close":
         result = await asyncio.to_thread(_bridge.call_service, 'gripper_close')
         await ws.send_text(json.dumps({"type": "log", "level": "INFO", "message": result['message']}))
+
+    elif cmd == "pencil_grip":
+        result = await asyncio.to_thread(_bridge.call_service, 'pencil_grip', 30.0)
+        level = "INFO" if result['success'] else "ERROR"
+        await broadcast({"type": "log", "level": level, "message": result['message']})
+
+    elif cmd == "pencil_release":
+        result = await asyncio.to_thread(_bridge.call_service, 'pencil_release', 30.0)
+        level = "INFO" if result['success'] else "ERROR"
+        await broadcast({"type": "log", "level": level, "message": result['message']})
 
     elif cmd == "frame_task":
         result = await asyncio.to_thread(_bridge.call_service, 'frame_task', 5.0)

@@ -49,6 +49,7 @@ export const NAV_ITEMS = [
 ] as const;
 
 export const FRAME_SIZES = [
+  { key: 'SQ107',  label: '107×107mm (64px·1.67mm)', w: 107, h: 107 },
   { key: 'SQ128',  label: '128×128mm (64px·2mm)', w: 128, h: 128 },
   { key: 'SQ256',  label: '256×256mm (64px·4mm)', w: 256, h: 256 },
   { key: 'A5',     label: 'A5  (148×210mm)',       w: 148, h: 210 },
@@ -63,6 +64,7 @@ export const FRAME_SIZES = [
 export const PAPER_TYPES = ['일반 용지', '수채화지', '캔버스', '아크릴보드'];
 
 export const RESOLUTIONS = [
+  { key:  'SQ64',  label:  '64×64   (4,096픽셀)  · 정사각',  w:  64, h:  64 },
   { key:  'A5_S',  label:  '50×71   (3,550픽셀)  · 빠름',    w:  50, h:  71 },
   { key:  'A5_M',  label:  '74×105  (7,770픽셀)  · 중간',    w:  74, h: 105 },
   { key:  'A5_L',  label: '100×142 (14,200픽셀) · 기본',     w: 100, h: 142 },
@@ -74,9 +76,9 @@ export const DEFAULT_ART_SETTINGS: ArtSettings = {
   frameWidth:   130,
   frameHeight:  185,
   paperType:    '일반 용지',
-  resolutionKey:'A5_M',
-  resWidth:      74,
-  resHeight:     105,
+  resolutionKey:'SQ64',
+  resWidth:      64,
+  resHeight:     64,
   brightness:   1.0,
   contrast:     1.0,
   rotation:     0,

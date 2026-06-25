@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import type { Settings } from '../types';
-import { RESOLUTIONS } from '../constants';
 
 interface Props {
   settings: Settings;
@@ -37,35 +36,6 @@ export default function SettingsPage({ settings, setSettings, addLog }: Props) {
       <h2 style={{ marginBottom: 20, fontSize: 20, fontWeight: 700 }}>시스템 설정</h2>
       <form onSubmit={save}>
 
-        {/* 이미지 설정 */}
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--accent)', marginBottom: 16 }}>이미지 설정</div>
-          <div style={{ marginBottom: 12, padding: '8px 12px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
-            용지: A5 (148×210mm) 고정
-          </div>
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>해상도</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
-              {RESOLUTIONS.map(r => {
-                const [main, sub] = r.label.split('·');
-                return (
-                  <button type="button" key={r.key}
-                    onClick={() => setForm(p => ({ ...p, resolutionKey: r.key }))}
-                    style={{
-                      padding: '10px 12px', borderRadius: 6, border: '1px solid', textAlign: 'left',
-                      borderColor: form.resolutionKey === r.key ? 'var(--accent)' : 'var(--border)',
-                      background: form.resolutionKey === r.key ? 'rgba(0,102,255,0.15)' : 'var(--panel2)',
-                      color: form.resolutionKey === r.key ? 'var(--accent)' : 'var(--text2)',
-                      cursor: 'pointer', fontWeight: form.resolutionKey === r.key ? 700 : 400,
-                    }}>
-                    <div style={{ fontSize: 13 }}>{main.trim()}</div>
-                    {sub && <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>{sub.trim()}</div>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
 
         {/* 힘 제어 설정 */}
         <div className="card" style={{ marginBottom: 16 }}>
