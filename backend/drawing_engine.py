@@ -43,10 +43,13 @@ def _build_contour_segments(pixels: list[dict], calibration: dict,
     for p in pixels:
         grid[p["y"]][p["x"]] = p["gray"]
 
+    FRAME_MARGIN_X = 9.0
+    FRAME_MARGIN_Y = 12.5
+
     z_up = float(calibration["origin_z"])
     z_dn = float(calibration["pen_down_z"])
-    ox   = float(calibration["origin_x"])
-    oy   = float(calibration["origin_y"])
+    ox   = float(calibration["origin_x"]) + FRAME_MARGIN_X
+    oy   = float(calibration["origin_y"]) + FRAME_MARGIN_Y
     if settings and settings.get("frameWidth") and settings.get("resWidth"):
         mm_x = float(settings["frameWidth"])  / float(settings["resWidth"])
         mm_y = float(settings["frameHeight"]) / float(settings["resHeight"])
@@ -167,10 +170,14 @@ def _build_path(pixels: list[dict], calibration: dict,
 
     grid: dict[tuple, int] = {(p["x"], p["y"]): p["gray"] for p in pixels}
 
+    # 액자 안쪽 여백: 캘리브레이션은 액자 꼭짓점(우하단), 실제 그림은 여백만큼 안쪽
+    FRAME_MARGIN_X = 9.0    # 로봇 X방향 여백 (mm)
+    FRAME_MARGIN_Y = 12.5   # 로봇 Y방향 여백 (mm)
+
     z_up = float(calibration["origin_z"])
     z_dn = float(calibration["pen_down_z"])
-    ox   = float(calibration["origin_x"])
-    oy   = float(calibration["origin_y"])
+    ox   = float(calibration["origin_x"]) + FRAME_MARGIN_X
+    oy   = float(calibration["origin_y"]) + FRAME_MARGIN_Y
     if settings and settings.get("frameWidth") and settings.get("resWidth"):
         mm_per_px_x = float(settings["frameWidth"])  / float(settings["resWidth"])
         mm_per_px_y = float(settings["frameHeight"]) / float(settings["resHeight"])

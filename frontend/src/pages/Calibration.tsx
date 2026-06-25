@@ -16,11 +16,13 @@ interface Props {
   onGripperClose?:  () => void;
 }
 
-const EMPTY_CALIB: CalibrationData = {
-  origin_x: 0, origin_y: 0, origin_z: 0,
-  pen_down_z: 0, pixel_spacing_mm: 2.0,
-  center_x: 0, center_y: 0,
-};
+const BASE_X = 462.0;
+const BASE_Y = -16.0;
+
+const STEP_OPTIONS = [0.5, 1, 2, 5] as const;
+type Step = typeof STEP_OPTIONS[number];
+
+const JOG_SPEED_OPTIONS = [10, 20, 30, 50] as const;
 
 function Row({ label, value, unit }: { label: string; value: string | number; unit?: string }) {
   return (
@@ -31,37 +33,62 @@ function Row({ label, value, unit }: { label: string; value: string | number; un
   );
 }
 
-// 0=BASE, 1=TOOL  /  axis: 6=X 7=Y 8=Z (task space)
-const JOG_SPEED_OPTIONS = [10, 20, 30, 50] as const;
+export default function CalibrationPage({
+  robotState, addLog, onGoHome, onSaveCalibration, savedCalib,
+  onJogStart, onJogStop, onJogMultiStart, onJogMultiStop, onSetRobotMode,
+  onGripperOpen, onGripperClose,
+}: Props) {
+  const [offsetX, setOffsetX] = useState(0);
+  const [offsetY, setOffsetY] = useState(0);
+  const [step, setStep]       = useState<Step>(1);
+  const [saved, setSaved]     = useState(false);
+  const [jogSpeed, setJogSpeed]   = useState<number>(20);
+  const [teaching, setTeaching]   = useState(false);
+  const [jogMode,  setJogMode]    = useState<'axis' | 'plane'>('axis');
+  const [jogPlane, setJogPlane]   = useState<'XY' | 'XZ' | 'YZ'>('XY');
 
-export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCalibration, savedCalib, onJogStart, onJogStop, onJogMultiStart, onJogMultiStop, onSetRobotMode, onGripperOpen, onGripperClose }: Props) {
-  const [calib, setCalib]           = useState<CalibrationData>(savedCalib ?? EMPTY_CALIB);
-  const [saved, setSaved]           = useState(false);
-  const [originSaved, setOriginSaved] = useState(false);
-  const [jogSpeed,  setJogSpeed]    = useState<number>(20);
-  const [teaching,  setTeaching]    = useState(false);
-  const [jogMode,   setJogMode]     = useState<'axis' | 'plane'>('axis');
-  const [jogPlane,  setJogPlane]    = useState<'XY' | 'XZ' | 'YZ'>('XY');
+  useEffect(() => {
+    if (savedCalib) {
+      setOffsetX(parseFloat(((savedCalib.origin_x ?? BASE_X) - BASE_X).toFixed(2)));
+      setOffsetY(parseFloat(((savedCalib.origin_y ?? BASE_Y) - BASE_Y).toFixed(2)));
+    }
+  }, [savedCalib]);
+
+  function adjust(axis: 'x' | 'y', sign: 1 | -1) {
+    if (axis === 'x') setOffsetX(v => parseFloat((v + sign * step).toFixed(2)));
+    else              setOffsetY(v => parseFloat((v + sign * step).toFixed(2)));
+  }
+
+  function saveCalib() {
+    const data: CalibrationData = {
+      ...(savedCalib ?? { origin_z: 0, pen_down_z: 0, pixel_spacing_mm: 2.0, center_x: 0, center_y: 0 }),
+      origin_x: parseFloat((BASE_X + offsetX).toFixed(2)),
+      origin_y: parseFloat((BASE_Y + offsetY).toFixed(2)),
+    };
+    onSaveCalibration(data);
+    setSaved(true);
+    addLog(`보정값 저장: X${offsetX >= 0 ? '+' : ''}${offsetX}mm, Y${offsetY >= 0 ? '+' : ''}${offsetY}mm → (${data.origin_x}, ${data.origin_y})`);
+    setTimeout(() => setSaved(false), 2000);
+  }
 
   function toggleTeaching() {
     const next = !teaching;
     setTeaching(next);
-    onSetRobotMode?.(next ? 0 : 1); // 0=MANUAL, 1=AUTONOMOUS
-    addLog(next ? '직접교시 모드 ON — 로봇을 손으로 움직일 수 있습니다' : '직접교시 모드 OFF');
+    onSetRobotMode?.(next ? 0 : 1);
+    addLog(next ? '직접교시 모드 ON' : '직접교시 모드 OFF');
   }
 
   function jogHandlers(axis: number, sign: 1 | -1) {
     const speed = sign * jogSpeed;
     return {
-      onMouseDown:   () => onJogStart?.(axis, speed),
-      onMouseUp:     () => onJogStop?.(axis),
-      onMouseLeave:  () => onJogStop?.(axis),
-      onTouchStart:  (e: React.TouchEvent) => { e.preventDefault(); onJogStart?.(axis, speed); },
-      onTouchEnd:    () => onJogStop?.(axis),
+      onMouseDown:  () => onJogStart?.(axis, speed),
+      onMouseUp:    () => onJogStop?.(axis),
+      onMouseLeave: () => onJogStop?.(axis),
+      onTouchStart: (e: React.TouchEvent) => { e.preventDefault(); onJogStart?.(axis, speed); },
+      onTouchEnd:   () => onJogStop?.(axis),
     };
   }
 
-  // 면정렬: 평면별 단위벡터 [Tx, Ty, Tz, Rx, Ry, Rz] 생성
   const D = 1 / Math.SQRT2;
   const PLANE_DIRS: Record<'XY'|'XZ'|'YZ', { label: string; vec: number[] }[]> = {
     XY: [
@@ -84,112 +111,120 @@ export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCa
   function multiHandlers(vec: number[]) {
     const isStop = vec.every(v => v === 0);
     return {
-      onMouseDown:   () => isStop ? onJogMultiStop?.() : onJogMultiStart?.(vec, jogSpeed),
-      onMouseUp:     () => onJogMultiStop?.(),
-      onMouseLeave:  () => onJogMultiStop?.(),
-      onTouchStart:  (e: React.TouchEvent) => { e.preventDefault(); isStop ? onJogMultiStop?.() : onJogMultiStart?.(vec, jogSpeed); },
-      onTouchEnd:    () => onJogMultiStop?.(),
+      onMouseDown:  () => isStop ? onJogMultiStop?.() : onJogMultiStart?.(vec, jogSpeed),
+      onMouseUp:    () => onJogMultiStop?.(),
+      onMouseLeave: () => onJogMultiStop?.(),
+      onTouchStart: (e: React.TouchEvent) => { e.preventDefault(); isStop ? onJogMultiStop?.() : onJogMultiStart?.(vec, jogSpeed); },
+      onTouchEnd:   () => onJogMultiStop?.(),
     };
   }
 
-  // 서버에서 캘리브레이션이 로드되면 UI에 반영
-  useEffect(() => {
-    if (savedCalib) setCalib(savedCalib);
-  }, [savedCalib]);
+  const effectiveX = parseFloat((BASE_X + offsetX).toFixed(2));
+  const effectiveY = parseFloat((BASE_Y + offsetY).toFixed(2));
 
-  function setOriginFromTCP() {
-    const updated = { ...calib, origin_x: robotState.tcpX, origin_y: robotState.tcpY, origin_z: robotState.tcpZ };
-    setCalib(updated);
-    onSaveCalibration(updated);
-    setOriginSaved(true);
-    addLog(`종이 우하단 저장: X=${robotState.tcpX.toFixed(1)}, Y=${robotState.tcpY.toFixed(1)}, Z=${robotState.tcpZ.toFixed(1)}`);
-    setTimeout(() => setOriginSaved(false), 2000);
-  }
-
-  function saveCalib() {
-    onSaveCalibration(calib);
-    setSaved(true);
-    addLog('캘리브레이션 저장됨');
-    setTimeout(() => setSaved(false), 2000);
-  }
-
-  function numField(key: keyof CalibrationData, label: string, unit: string, step = 0.1) {
-    return (
-      <div key={key}>
-        <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 5 }}>{label} ({unit})</div>
-        <input
-          type="number"
-          step={step}
-          value={calib[key] ?? 0}
-          onChange={e => setCalib(p => ({ ...p, [key]: Number(e.target.value) }))}
-        />
-      </div>
-    );
-  }
+  const btnAdj: React.CSSProperties = {
+    width: 44, height: 44, fontSize: 20, fontWeight: 700,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  };
 
   return (
     <div>
       <h2 style={{ marginBottom: 20, fontSize: 20, fontWeight: 700 }}>캘리브레이션</h2>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-        {/* 현재 TCP 위치 */}
-        <div className="card">
-          <div className="card-title">현재 TCP 위치 (실시간)</div>
-          <Row label="X" value={robotState.tcpX.toFixed(2)} unit="mm" />
-          <Row label="Y" value={robotState.tcpY.toFixed(2)} unit="mm" />
-          <Row label="Z" value={robotState.tcpZ.toFixed(2)} unit="mm" />
-          <Row label="속도" value={`${robotState.speed} mm/s`} />
 
-          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-            <button className={originSaved ? 'btn-success' : 'btn-primary'} style={{ flex: 1 }}
-              onClick={setOriginFromTCP}>
-              {originSaved ? '✓ 우하단 저장됨' : '현재 위치를 종이 우하단으로 저장'}
+        {/* 위치 보정 */}
+        <div className="card">
+          <div className="card-title">위치 보정 (기준점으로부터 이동량)</div>
+
+          <div style={{ marginBottom: 14, padding: '8px 12px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
+            기준점 &nbsp; X = <b style={{ color: 'var(--accent)' }}>{BASE_X}</b> &nbsp; Y = <b style={{ color: 'var(--accent)' }}>{BASE_Y}</b>
+          </div>
+
+          {/* 이동 단위 선택 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
+            <span style={{ fontSize: 12, color: 'var(--text2)' }}>단위</span>
+            {STEP_OPTIONS.map(s => (
+              <button key={s}
+                className={step === s ? 'btn-primary' : 'btn-ghost'}
+                style={{ padding: '3px 10px', fontSize: 12 }}
+                onClick={() => setStep(s)}>
+                {s}mm
+              </button>
+            ))}
+          </div>
+
+          {/* X 보정 */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>X 보정</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button className="btn-ghost" style={btnAdj} onClick={() => adjust('x', -1)}>−</button>
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent)' }}>
+                  {offsetX >= 0 ? '+' : ''}{offsetX}
+                </span>
+                <span style={{ fontSize: 13, color: 'var(--text2)', marginLeft: 4 }}>mm</span>
+              </div>
+              <button className="btn-ghost" style={btnAdj} onClick={() => adjust('x', 1)}>+</button>
+            </div>
+          </div>
+
+          {/* Y 보정 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>Y 보정</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button className="btn-ghost" style={btnAdj} onClick={() => adjust('y', -1)}>−</button>
+              <div style={{ flex: 1, textAlign: 'center' }}>
+                <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent)' }}>
+                  {offsetY >= 0 ? '+' : ''}{offsetY}
+                </span>
+                <span style={{ fontSize: 13, color: 'var(--text2)', marginLeft: 4 }}>mm</span>
+              </div>
+              <button className="btn-ghost" style={btnAdj} onClick={() => adjust('y', 1)}>+</button>
+            </div>
+          </div>
+
+          {/* 적용될 좌표 */}
+          <div style={{ padding: '10px 12px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)', marginBottom: 14 }}>
+            적용 위치 &nbsp;
+            X: <b style={{ color: 'var(--accent)' }}>{effectiveX}</b> &nbsp;
+            Y: <b style={{ color: 'var(--accent)' }}>{effectiveY}</b>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className={saved ? 'btn-success' : 'btn-primary'} style={{ flex: 1 }} onClick={saveCalib}>
+              {saved ? '✓ 저장됨' : '보정값 저장'}
             </button>
-            <button className="btn-ghost" onClick={onGoHome}>
+            <button className="btn-ghost" onClick={() => { setOffsetX(0); setOffsetY(0); }}>
+              초기화
+            </button>
+          </div>
+        </div>
+
+        {/* 현재 TCP + 픽셀 간격 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card">
+            <div className="card-title">현재 TCP 위치 (실시간)</div>
+            <Row label="X" value={robotState.tcpX.toFixed(2)} unit="mm" />
+            <Row label="Y" value={robotState.tcpY.toFixed(2)} unit="mm" />
+            <Row label="Z" value={robotState.tcpZ.toFixed(2)} unit="mm" />
+            <button className="btn-ghost" style={{ marginTop: 12, width: '100%' }} onClick={onGoHome}>
               원점 이동
             </button>
           </div>
-
-          <div style={{ marginTop: 16, padding: '10px 12px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>저장된 종이 우하단</div>
-            <div>X: <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{calib.origin_x.toFixed(2)}</span> mm &nbsp;
-              Y: <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{calib.origin_y.toFixed(2)}</span> mm &nbsp;
-              Z: <span style={{ color: 'var(--accent)', fontWeight: 700 }}>{calib.origin_z.toFixed(2)}</span> mm
+          <div className="card">
+            <div className="card-title">Z</div>
+            <div style={{ padding: '8px 10px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
+              Z 높이는 그리기 시작 시 첫 픽셀 위치에서 자동 측정됩니다
             </div>
-          </div>
-        </div>
-
-        {/* 픽셀 간격 */}
-        <div className="card">
-          <div className="card-title">픽셀 간격</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
-            {numField('pixel_spacing_mm', '픽셀 간격', 'mm', 0.1)}
-          </div>
-          <div style={{ marginTop: 12, padding: '8px 10px', background: 'var(--panel2)', borderRadius: 6, fontSize: 11, color: 'var(--text2)' }}>
-            Z 높이는 그리기 시작 시 첫 픽셀 위치에서 자동 측정됩니다
-          </div>
-        </div>
-      </div>
-
-      {/* 좌표 설정 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-        {/* S자 — 우하단 */}
-        <div className="card">
-          <div className="card-title">▶ S자 기준점 (종이 우하단)</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            {numField('origin_x', 'X', 'mm')}
-            {numField('origin_y', 'Y', 'mm')}
-          </div>
-          <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--panel2)', borderRadius: 6, fontSize: 11, color: 'var(--text2)' }}>
-            로봇을 종이 우하단 모서리에 위치시킨 후 저장
           </div>
         </div>
       </div>
 
       {/* 조그 */}
-      <div className="card" style={{ marginBottom: 20 }}>
+      <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div className="card-title" style={{ margin: 0 }}>조그 (축정렬)</div>
+          <div className="card-title" style={{ margin: 0 }}>조그</div>
           <button
             className={teaching ? 'btn-primary' : 'btn-ghost'}
             style={{ padding: '6px 14px', fontSize: 13 }}
@@ -204,7 +239,6 @@ export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCa
           </div>
         )}
 
-        {/* 축정렬 / 면정렬 탭 */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 12, opacity: teaching ? 0.35 : 1, pointerEvents: teaching ? 'none' : 'auto' }}>
           {(['axis', 'plane'] as const).map(m => (
             <button key={m}
@@ -273,7 +307,6 @@ export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCa
             </div>
           )}
 
-          {/* 그리퍼 */}
           <div style={{ marginTop: 16, display: 'flex', gap: 10 }}>
             <button className="btn-outline" style={{ flex: 1 }}
               onMouseDown={() => onGripperOpen?.()} onTouchStart={() => onGripperOpen?.()}>
@@ -285,17 +318,6 @@ export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCa
             </button>
           </div>
         </div>
-      </div>
-
-      {/* 저장 */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <button className="btn-primary" style={{ padding: '10px 32px' }} onClick={saveCalib}>
-          {saved ? '✓ 저장됨' : '캘리브레이션 저장'}
-        </button>
-        <button className="btn-ghost" onClick={() => setCalib(savedCalib ?? EMPTY_CALIB)}>
-          초기화
-        </button>
-        <span style={{ fontSize: 12, color: 'var(--text2)' }}>* 저장 즉시 그리기에 반영됩니다</span>
       </div>
     </div>
   );

@@ -777,15 +777,13 @@ class RobotController:
         log.info("Y방향 nudge 완료")
 
     def move_to_xy(self, rx: float, ry: float, z_up: float):
-        """지정 X,Y로 안전 Z 높이에서 이동 (Z 측정 전 위치 이동용)"""
+        """지정 X,Y로 안전 Z 높이에서 이동 (Z 측정 전 위치 이동용)."""
         if not _dsr_available:
             return
         posx  = _dsr_funcs['posx']
         movel = _dsr_funcs['movel']
-        DR_BASE = _dsr_funcs['DR_BASE']
         target = posx(rx, ry, z_up, 0, 180, 0)
-        movel(target, vel=[self._move_speed, self._move_speed],
-              acc=[self._move_speed * 2, self._move_speed * 2], ref=DR_BASE)
+        movel(target, vel=[self._move_speed, 30], acc=[self._move_speed * 2, 60])
 
     # ── 자동 Z 캘리브레이션 ──────────────────────────────────────
     def auto_calibrate_z(self) -> dict:
@@ -911,6 +909,9 @@ class RobotController:
             movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
             if self.state.estop: return
             movel(pos_home, vel=[100, 100], acc=[50, 50], mod=0)
+            # 드로잉 방향(0, 180, 0)으로 손목 미리 정렬 — 이후 movel 시 117° 스핀 방지
+            pos_home_aligned = posx(526.83, 54.46, 506.64, 0, 180, 0)
+            movel(pos_home_aligned, vel=[50, 30], acc=[50, 30])
             log.info("연필 홈 이동 완료")
             return
 
@@ -1011,13 +1012,13 @@ class RobotController:
 
         # ── 2. 종이 슬라이딩 & 픽업 ─────────────────────────────
         log.info("종이 픽업 시작")
-        pos_paper_center       = posx(547.03,  75.97, 334.62,   9.86, 180.00,  98.32)
-        pos_cliff_edge         = posx(547.03, 120.97, 334.63, 179.99, 180.00, -91.36)
+        pos_paper_center       = posx(563.03,  75.97, 328.62,   9.86, 180.00,  98.32)
+        pos_cliff_edge         = posx(563.03, 120.97, 328.63, 179.99, 180.00, -91.36)
         pos_frame_paper_prepare= posx(288.95, 239.42, 444.60,  91, -135.9, 179)
         pos_frame_paper0       = posx(288.97, 190,    367.05,  91.03, -135.90, 178.99)
-        pinch_ready_pos0 = posx(554.45, 403.09, 193.32, 91.36, -90.00,  180.00)
-        pinch_ready_pos1 = posx(554.45, 403.11, 103.32, 91.36, -90.00,  180.00)
-        pinch_ready_pos2 = posx(554.45, 383.14, 103.32, 91.36, -90.00, -180.00)
+        pinch_ready_pos0 = posx(565.45, 403.09, 193.32, 91.36, -90.00, 180.00)
+        pinch_ready_pos1 = posx(565.45, 403.11, 103.32, 91.36, -90.00, 180.00)
+        pinch_ready_pos2 = posx(565.45, 383.14, 103.32, 91.36, -90.00, 180.00)
         hover_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2]+20,
                          pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
         ready_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2]+2,
@@ -1031,7 +1032,7 @@ class RobotController:
             movel(ready_pos, vel=30, acc=50, mod=0)
             task_compliance_ctrl(stx=[500, 500, 500, 100, 100, 100])
             time.sleep(0.5)
-            set_desired_force(fd=[0, 0, -3, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
+            set_desired_force(fd=[0, 0, -2, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
             time.sleep(2)
             current_pos, _ = get_current_posx(ref=DR_BASE)
             if current_pos[2] < 324.0:
@@ -1058,7 +1059,7 @@ class RobotController:
         if not _chk(): return
         movel(pinch_ready_pos0, vel=[100, 100], acc=[50, 50])
         movel(pinch_ready_pos1, vel=[100, 100], acc=[50, 50])
-        movel(pinch_ready_pos2, vel=[100, 100], acc=[50, 50])
+        movel(pinch_ready_pos2, vel=[50, 50],   acc=[50, 50])
         self.gripper_close()
         movel(pinch_ready_pos0, vel=[100, 100], acc=[50, 50])
         if not _chk(): return
