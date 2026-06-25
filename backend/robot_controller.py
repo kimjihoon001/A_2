@@ -246,6 +246,7 @@ class RobotController:
         self._lock = threading.Lock()
         self._move_speed   = float(MOVE_SPEED)
         self._dot_hold_sec = float(DOT_HOLD_SEC)
+        self.robot_ip, self.robot_port = _read_dsr_robot_params()
 
     def load_config(self):
         """드로잉 시작 전 DB에서 속도 설정 로드."""
