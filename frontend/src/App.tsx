@@ -320,6 +320,11 @@ export default function App() {
         savedCalib={calibration}
         onCalibrateZ={() => { if (serverConnected) server.calibrateZ(); }}
         calibratedZ={calibratedZ}
+        onJogStart={(axis, speed) => { if (serverConnected) server.jogStart(axis, speed); }}
+        onJogStop={(axis) => { if (serverConnected) server.jogStop(axis); }}
+        onJogMultiStart={(vec, speed) => { if (serverConnected) server.jogMultiStart(vec, speed); }}
+        onJogMultiStop={() => { if (serverConnected) server.jogMultiStop(); }}
+        onSetRobotMode={(mode) => { if (serverConnected) server.setRobotMode(mode); }}
       />
     ),
     safety: (

@@ -19,7 +19,7 @@ from rclpy.node import Node
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from std_msgs.msg import Float64MultiArray
-from dsr_msgs2.srv import ServoOff, SetRobotControl, GetRobotState
+from dsr_msgs2.srv import ServoOff, SetRobotControl, GetRobotState, Jog, JogMulti, SetRobotMode
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from config import WS_HOST, WS_PORT, STATUS_INTERVAL_SEC
@@ -61,6 +61,9 @@ class BridgeNode(Node):
         self._servo_off_client = self.create_client(ServoOff,        '/dsr01/system/servo_off')
         self._servo_on_client  = self.create_client(SetRobotControl, '/dsr01/system/set_robot_control')
         self._state_client     = self.create_client(GetRobotState,   '/dsr01/system/get_robot_state')
+        self._jog_client       = self.create_client(Jog,             '/dsr01/motion/jog')
+        self._jog_multi_client = self.create_client(JogMulti,        '/dsr01/motion/jog_multi')
+        self._set_mode_client  = self.create_client(SetRobotMode,    '/dsr01/system/set_robot_mode')
 
         # 연결 상태 폴링 (0.5초)
         self._dsr_connected = False
@@ -77,6 +80,49 @@ class BridgeNode(Node):
         self.create_subscription(String, '/robot_art/log',    self._on_log,    10)
 
     # ── 픽셀 전송 ───────────────────────────────────────────────
+    def call_jog(self, axis: int, speed: float, ref: int = 0, timeout: float = 2.0) -> dict:
+        if not self._jog_client.wait_for_service(timeout_sec=timeout):
+            return {'success': False, 'message': 'jog 서비스 응답 없음'}
+        req = Jog.Request()
+        req.jog_axis       = axis
+        req.move_reference = ref
+        req.speed          = speed
+        done = threading.Event()
+        result_box: list = [None]
+        future = self._jog_client.call_async(req)
+        future.add_done_callback(lambda f: (result_box.__setitem__(0, f.result()), done.set()))
+        if not done.wait(timeout=timeout):
+            return {'success': False, 'message': 'jog 응답 타임아웃'}
+        return {'success': result_box[0].success}
+
+    def call_jog_multi(self, vector: list, speed: float, ref: int = 0, timeout: float = 2.0) -> dict:
+        if not self._jog_multi_client.wait_for_service(timeout_sec=timeout):
+            return {'success': False, 'message': 'jog_multi 서비스 응답 없음'}
+        req = JogMulti.Request()
+        req.jog_axis       = vector          # float64[6] 단위벡터
+        req.move_reference = ref
+        req.speed          = speed
+        done = threading.Event()
+        result_box: list = [None]
+        future = self._jog_multi_client.call_async(req)
+        future.add_done_callback(lambda f: (result_box.__setitem__(0, f.result()), done.set()))
+        if not done.wait(timeout=timeout):
+            return {'success': False, 'message': 'jog_multi 응답 타임아웃'}
+        return {'success': result_box[0].success}
+
+    def call_set_robot_mode(self, mode: int, timeout: float = 3.0) -> dict:
+        if not self._set_mode_client.wait_for_service(timeout_sec=timeout):
+            return {'success': False, 'message': 'set_robot_mode 서비스 응답 없음'}
+        req = SetRobotMode.Request()
+        req.robot_mode = mode
+        done = threading.Event()
+        result_box: list = [None]
+        future = self._set_mode_client.call_async(req)
+        future.add_done_callback(lambda f: (result_box.__setitem__(0, f.result()), done.set()))
+        if not done.wait(timeout=timeout):
+            return {'success': False, 'message': 'set_robot_mode 응답 타임아웃'}
+        return {'success': result_box[0].success}
+
     def publish_pixels(self, pixels: list, settings: dict, image_name: str):
         msg = String()
         msg.data = json.dumps(
@@ -310,6 +356,26 @@ async def handle_command(ws: WebSocket, msg: dict):
         result = await asyncio.to_thread(_bridge.call_service, 'frame_task', 5.0)
         level = "INFO" if result['success'] else "ERROR"
         await broadcast({"type": "log", "level": level, "message": result['message']})
+
+    elif cmd == "jog":
+        axis  = int(msg.get('axis',  6))
+        speed = float(msg.get('speed', 0))
+        ref   = int(msg.get('ref',   0))
+        await asyncio.to_thread(_bridge.call_jog, axis, speed, ref)
+
+    elif cmd == "jog_multi":
+        vector = [float(v) for v in msg.get('vector', [0]*6)]
+        speed  = float(msg.get('speed', 0))
+        ref    = int(msg.get('ref', 0))
+        await asyncio.to_thread(_bridge.call_jog_multi, vector, speed, ref)
+
+    elif cmd == "set_robot_mode":
+        mode   = int(msg.get('mode', 1))
+        result = await asyncio.to_thread(_bridge.call_set_robot_mode, mode)
+        label  = '직접교시(MANUAL)' if mode == 0 else 'AUTONOMOUS'
+        level  = 'INFO' if result['success'] else 'ERROR'
+        msg_text = f"로봇 모드 변경: {label}" if result['success'] else result['message']
+        await ws.send_text(json.dumps({"type": "log", "level": level, "message": msg_text}))
 
     elif cmd == "calibrate_z":
         result = await asyncio.to_thread(_bridge.call_service, 'calibrate_z', 10.0)

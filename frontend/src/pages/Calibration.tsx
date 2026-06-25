@@ -10,6 +10,11 @@ interface Props {
   savedCalib: CalibrationData | null;
   onCalibrateZ?: () => void;
   calibratedZ?: CalibrateZResult | null;
+  onJogStart?:      (axis: number, speed: number) => void;
+  onJogStop?:       (axis: number) => void;
+  onJogMultiStart?: (vector: number[], speed: number) => void;
+  onJogMultiStop?:  () => void;
+  onSetRobotMode?:  (mode: number) => void;
 }
 
 const EMPTY_CALIB: CalibrationData = {
@@ -27,12 +32,68 @@ function Row({ label, value, unit }: { label: string; value: string | number; un
   );
 }
 
-export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCalibration, savedCalib, onCalibrateZ, calibratedZ }: Props) {
+// 0=BASE, 1=TOOL  /  axis: 6=X 7=Y 8=Z (task space)
+const JOG_SPEED_OPTIONS = [10, 20, 30, 50] as const;
+
+export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCalibration, savedCalib, onCalibrateZ, calibratedZ, onJogStart, onJogStop, onJogMultiStart, onJogMultiStop, onSetRobotMode }: Props) {
   const [calib, setCalib]           = useState<CalibrationData>(savedCalib ?? EMPTY_CALIB);
   const [saved, setSaved]           = useState(false);
   const [originSaved, setOriginSaved] = useState(false);
   const [zMeasuring, setZMeasuring] = useState(false);
   const [zMeasured,  setZMeasured]  = useState(false);
+  const [jogSpeed,  setJogSpeed]    = useState<number>(20);
+  const [teaching,  setTeaching]    = useState(false);
+  const [jogMode,   setJogMode]     = useState<'axis' | 'plane'>('axis');
+  const [jogPlane,  setJogPlane]    = useState<'XY' | 'XZ' | 'YZ'>('XY');
+
+  function toggleTeaching() {
+    const next = !teaching;
+    setTeaching(next);
+    onSetRobotMode?.(next ? 0 : 1); // 0=MANUAL, 1=AUTONOMOUS
+    addLog(next ? '직접교시 모드 ON — 로봇을 손으로 움직일 수 있습니다' : '직접교시 모드 OFF');
+  }
+
+  function jogHandlers(axis: number, sign: 1 | -1) {
+    const speed = sign * jogSpeed;
+    return {
+      onMouseDown:   () => onJogStart?.(axis, speed),
+      onMouseUp:     () => onJogStop?.(axis),
+      onMouseLeave:  () => onJogStop?.(axis),
+      onTouchStart:  (e: React.TouchEvent) => { e.preventDefault(); onJogStart?.(axis, speed); },
+      onTouchEnd:    () => onJogStop?.(axis),
+    };
+  }
+
+  // 면정렬: 평면별 단위벡터 [Tx, Ty, Tz, Rx, Ry, Rz] 생성
+  const D = 1 / Math.SQRT2;
+  const PLANE_DIRS: Record<'XY'|'XZ'|'YZ', { label: string; vec: number[] }[]> = {
+    XY: [
+      { label: '↖', vec: [-D,  D, 0, 0, 0, 0] }, { label: '↑', vec: [ 0,  1, 0, 0, 0, 0] }, { label: '↗', vec: [ D,  D, 0, 0, 0, 0] },
+      { label: '←', vec: [-1,  0, 0, 0, 0, 0] }, { label: '·', vec: [0, 0, 0, 0, 0, 0]    }, { label: '→', vec: [ 1,  0, 0, 0, 0, 0] },
+      { label: '↙', vec: [-D, -D, 0, 0, 0, 0] }, { label: '↓', vec: [ 0, -1, 0, 0, 0, 0] }, { label: '↘', vec: [ D, -D, 0, 0, 0, 0] },
+    ],
+    XZ: [
+      { label: '↖', vec: [-D, 0,  D, 0, 0, 0] }, { label: '↑', vec: [ 0, 0,  1, 0, 0, 0] }, { label: '↗', vec: [ D, 0,  D, 0, 0, 0] },
+      { label: '←', vec: [-1, 0,  0, 0, 0, 0] }, { label: '·', vec: [0, 0, 0, 0, 0, 0]    }, { label: '→', vec: [ 1, 0,  0, 0, 0, 0] },
+      { label: '↙', vec: [-D, 0, -D, 0, 0, 0] }, { label: '↓', vec: [ 0, 0, -1, 0, 0, 0] }, { label: '↘', vec: [ D, 0, -D, 0, 0, 0] },
+    ],
+    YZ: [
+      { label: '↖', vec: [0, -D,  D, 0, 0, 0] }, { label: '↑', vec: [0,  0,  1, 0, 0, 0] }, { label: '↗', vec: [0,  D,  D, 0, 0, 0] },
+      { label: '←', vec: [0, -1,  0, 0, 0, 0] }, { label: '·', vec: [0, 0, 0, 0, 0, 0]    }, { label: '→', vec: [0,  1,  0, 0, 0, 0] },
+      { label: '↙', vec: [0, -D, -D, 0, 0, 0] }, { label: '↓', vec: [0,  0, -1, 0, 0, 0] }, { label: '↘', vec: [0,  D, -D, 0, 0, 0] },
+    ],
+  };
+
+  function multiHandlers(vec: number[]) {
+    const isStop = vec.every(v => v === 0);
+    return {
+      onMouseDown:   () => isStop ? onJogMultiStop?.() : onJogMultiStart?.(vec, jogSpeed),
+      onMouseUp:     () => onJogMultiStop?.(),
+      onMouseLeave:  () => onJogMultiStop?.(),
+      onTouchStart:  (e: React.TouchEvent) => { e.preventDefault(); isStop ? onJogMultiStop?.() : onJogMultiStart?.(vec, jogSpeed); },
+      onTouchEnd:    () => onJogMultiStop?.(),
+    };
+  }
 
   // 서버에서 캘리브레이션이 로드되면 UI에 반영
   useEffect(() => {
@@ -158,6 +219,95 @@ export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCa
           <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--panel2)', borderRadius: 6, fontSize: 11, color: 'var(--text2)' }}>
             로봇을 종이 좌상단 모서리에 위치시킨 후 저장
           </div>
+        </div>
+      </div>
+
+      {/* 조그 */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div className="card-title" style={{ margin: 0 }}>조그 (축정렬)</div>
+          <button
+            className={teaching ? 'btn-primary' : 'btn-ghost'}
+            style={{ padding: '6px 14px', fontSize: 13 }}
+            onClick={toggleTeaching}>
+            {teaching ? '✋ 직접교시 ON' : '손으로 움직이기'}
+          </button>
+        </div>
+
+        {teaching && (
+          <div style={{ marginBottom: 12, padding: '8px 12px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--accent)' }}>
+            직접교시 모드: 로봇을 손으로 잡고 원하는 위치로 이동하세요. 종료하려면 버튼을 다시 누르세요.
+          </div>
+        )}
+
+        {/* 축정렬 / 면정렬 탭 */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12, opacity: teaching ? 0.35 : 1, pointerEvents: teaching ? 'none' : 'auto' }}>
+          {(['axis', 'plane'] as const).map(m => (
+            <button key={m}
+              className={jogMode === m ? 'btn-primary' : 'btn-ghost'}
+              style={{ padding: '4px 14px', fontSize: 13 }}
+              onClick={() => setJogMode(m)}>
+              {m === 'axis' ? '축정렬' : '면정렬'}
+            </button>
+          ))}
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 12, color: 'var(--text2)', alignSelf: 'center' }}>속도</span>
+          {JOG_SPEED_OPTIONS.map(v => (
+            <button key={v}
+              className={jogSpeed === v ? 'btn-primary' : 'btn-ghost'}
+              style={{ padding: '3px 10px', fontSize: 12 }}
+              onClick={() => setJogSpeed(v)}>
+              {v}%
+            </button>
+          ))}
+        </div>
+
+        <div style={{ opacity: teaching ? 0.35 : 1, pointerEvents: teaching ? 'none' : 'auto' }}>
+          {jogMode === 'axis' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+              {([['X', 6], ['Y', 7], ['Z', 8]] as [string, number][]).map(([label, axis]) => (
+                <div key={axis} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', textAlign: 'center' }}>{label}</div>
+                  <button className="btn-ghost" style={{ userSelect: 'none' }} {...jogHandlers(axis, 1)}>{label}+</button>
+                  <button className="btn-ghost" style={{ userSelect: 'none' }} {...jogHandlers(axis, -1)}>{label}−</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {jogMode === 'plane' && (
+            <div>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                {(['XY', 'XZ', 'YZ'] as const).map(p => (
+                  <button key={p}
+                    className={jogPlane === p ? 'btn-primary' : 'btn-ghost'}
+                    style={{ padding: '3px 14px', fontSize: 13 }}
+                    onClick={() => setJogPlane(p)}>
+                    {p}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 52px)', gap: 4 }}>
+                {PLANE_DIRS[jogPlane].map((d, i) => (
+                  <button key={i}
+                    style={{
+                      height: 52, fontSize: 20, userSelect: 'none',
+                      opacity: d.label === '·' ? 0.2 : 1,
+                      cursor:  d.label === '·' ? 'default' : 'pointer',
+                    }}
+                    disabled={d.label === '·'}
+                    {...(d.label !== '·' ? multiHandlers(d.vec) : {})}>
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text2)' }}>
+                {jogPlane === 'XY' && '← → = X축  ↑ ↓ = Y축'}
+                {jogPlane === 'XZ' && '← → = X축  ↑ ↓ = Z축'}
+                {jogPlane === 'YZ' && '← → = Y축  ↑ ↓ = Z축'}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
