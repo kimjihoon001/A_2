@@ -1,7 +1,8 @@
 import time
+import socket
+import struct
 import rclpy
 import DR_init
-
 # 로봇 기본 설정
 ROBOT_ID = "dsr01"
 ROBOT_MODEL = "m0609"
@@ -45,6 +46,22 @@ def main(args=None):
     # ==========================================
     # 1. 헬퍼(Helper) 및 작업 단계별 주요 함수
     # ==========================================
+
+    def get_gripper_width():
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1.0)
+                # RG2 그리퍼의 IP와 Port (환경에 맞게 수정 필요)
+                s.connect(('192.168.1.1', 502))
+                req = struct.pack('>HHHBBHH', 1, 0, 6, 65, 0x03, 275, 1)
+                s.sendall(req)
+                resp = s.recv(256)
+                if len(resp) >= 11:
+                    return struct.unpack('>H', resp[9:11])[0] / 10.0
+        except Exception as e:
+            node.get_logger().error(f"그리퍼 너비 읽기 실패: {e}")
+        return None
+
     def gripper_open():
         set_digital_output(1, ON)
         set_digital_output(2, OFF)
@@ -85,44 +102,68 @@ def main(args=None):
         time.sleep(0.05)
         movej(home_pos, vel = 30, acc = 50)
 
+        while rclpy.ok():
 
-        node.get_logger().info("--- [1] 액자 파지 시작 ---")
-        
-        time.sleep(0.05)
-        # 1. 액자 상공으로 이동
-        movej(pos_lowframe_start_hover, vel = 100, acc = 50)
+            node.get_logger().info("--- [1] 액자 파지 시작 ---")
+            
+            time.sleep(0.05)
+            # 1. 액자 상공으로 이동
+            movej(pos_lowframe_start_hover, vel = 100, acc = 50)
 
-        time.sleep(0.05)
-        # # 2. 액자 위치로 하강
-        movel(pos_lowframe_start, vel = [100,100], acc = [50,50])
+            time.sleep(0.05)
+            # # 2. 액자 위치로 하강
+            movel(pos_lowframe_start, vel = [100,100], acc = [50,50])
 
-        # 액자 파지
-        time.sleep(0.05)
-        gripper_close()
+            # 액자 파지
+            time.sleep(0.05)
+            gripper_close()
 
-        # 액자 상공으로 복귀
-        time.sleep(0.05)
-        movel(pos_lowframe_start_hoverx, vel = [100,100], acc = [50,50])
+            # ==========================================
+            # [예외 처리 추가] 액자가 정상적으로 잡혔는지 확인
+            # ==========================================
+            time.sleep(0.5)
+            current_width = get_gripper_width()  # 현재 그리퍼 폭 읽기
+            MIN_FRAME_WIDTH = 15.0  # 허용되는 최소 액자 두께 (mm) - 액자 실제 두께에 맞춰 수정하세요!
 
-        # 배치 위치 상공으로 이동
-        time.sleep(0.05)
-        movej(pos_frame_lower1, vel = 100, acc = 50)
+            if current_width is not None and current_width < MIN_FRAME_WIDTH:
+                node.get_logger().error(f":경고: 예외 발생: 액자가 파지되지 않았습니다! (현재 폭: {current_width}mm)")
+                gripper_open() # 안전을 위해 다시 열기
+                movej(pos_lowframe_start_hover, vel=30, acc=50) # 홈 위치로 원복
 
-        # 액자 배치 및 그리퍼 열기
-        time.sleep(0.05)
-        movel(pos_frame_lower2, vel = [100,100], acc = [30,30], mod = 0)
-        time.sleep(0.05)
-        gripper_open()
-        time.sleep(0.5)
+                node.get_logger().info("작업을 중단합니다. 액자를 제자리에 놓아주세요.")
+                time.sleep(10)
+                continue # 실무에선 hmi 경고창 종료시까지 대기 후 이어서 진행할것
+            elif current_width is not None:
+                node.get_logger().info(f":흰색_확인_표시: 액자 파지 확인 완료. (현재 폭: {current_width}mm)")
+            else:
+                node.get_logger().warning("그리퍼 폭 센서를 읽을 수 없지만 작업을 계속 진행합니다.")
+            # ==========================================
 
-        # 충돌 방지를 위해 후진
-        movel(pos_frame_lower3, vel = [100,100], acc = [50,50], mod = 0)
-        time.sleep(0.05)
-        movel(pos_frame_lower4, vel = [100,100], acc = [50,50], mod = 0)
+            # 액자 상공으로 복귀
+            time.sleep(0.05)
+            movel(pos_lowframe_start_hoverx, vel = [100,100], acc = [50,50])
 
-        # 안전 위치로 복귀
-        time.sleep(0.05)
-        movej(home_pos, vel = 100, acc = 50)
+            # 배치 위치 상공으로 이동
+            time.sleep(0.05)
+            movej(pos_frame_lower1, vel = 100, acc = 50)
+
+            # 액자 배치 및 그리퍼 열기
+            time.sleep(0.05)
+            movel(pos_frame_lower2, vel = [100,100], acc = [30,30], mod = 0)
+            time.sleep(0.05)
+            gripper_open()
+            time.sleep(0.5)
+
+            # 충돌 방지를 위해 후진
+            movel(pos_frame_lower3, vel = [100,100], acc = [50,50], mod = 0)
+            time.sleep(0.05)
+            movel(pos_frame_lower4, vel = [100,100], acc = [50,50], mod = 0)
+
+            # 안전 위치로 복귀
+            time.sleep(0.05)
+            movej(home_pos, vel = 100, acc = 50)
+
+            return True
 
     
     def frame_high_setup():
@@ -133,7 +174,7 @@ def main(args=None):
         pos_frame_highstart = posx(295.36, -127.08, 347.73, 67.75, 179.95, -22.29)
 
         # 액자 하판 위치
-        pos_frame_high1 = posj(60.55, 31.09, 84.84, 127.70, -141.56, -46) # 검증 필요!
+        pos_frame_high1 = posx(274.49, 328.02, 231.75, 90.06, -90.00, 0.00) # 검증 필요!
         pos_frame_high2 = posx(274.49, 328.02, 81.75, 90.06, -90.00, 0.00)
         pos_frame_high3= posx(274.49, 378.02, 81.75, 90.06, -90.00, 0.00)
         pos_frame_high4 = posx(274.49, 378.02, 181.75, 90.06, -90.00, 0.00)
@@ -141,48 +182,73 @@ def main(args=None):
 
         # 홈 위치(특이점 제어를 위해 j사용)
         home_pos = posj(-0.01, 0.01, 90.00, 180.02, -89.98, 0)
-        
-        # ==========================================
-        # 단계 1. 액자 누르고 절벽(더미 밖)으로 밀기
-        # ==========================================
-        # 시작전 홈위치 이동
 
-        time.sleep(0.05)
-        gripper_open()
+        while rclpy.ok():
+            
+            # ==========================================
+            # 단계 1. 액자 누르고 절벽(더미 밖)으로 밀기
+            # ==========================================
+            # 시작전 홈위치 이동
 
-        node.get_logger().info("--- [1] 액자 파지 시작 ---")
-        
-        time.sleep(0.05)
-        # 1. 액자 상공으로 이동
-        movel(pos_frame_highstart_hover, vel = 100, acc = 50)
+            time.sleep(0.05)
+            gripper_open()
 
-        time.sleep(0.05)
-        # # 2. 액자 위치로 하강
-        movel(pos_frame_highstart, vel = [100,100], acc = [50,50])
-        time.sleep(0.05)
-        gripper_close()
+            node.get_logger().info("--- [1] 액자 파지 시작 ---")
+            
+            time.sleep(0.05)
+            # 1. 액자 상공으로 이동
+            movel(pos_frame_highstart_hover, vel = 100, acc = 50)
 
-        time.sleep(0.1)
-        movel(pos_frame_highstart_hoverx, vel = [100,100], acc = [50,50])
+            time.sleep(0.05)
+            # # 2. 액자 위치로 하강
+            movel(pos_frame_highstart, vel = [100,100], acc = [50,50])
+            time.sleep(0.05)
+            gripper_close()
 
-        # time.sleep(0.05)
-        # movej(pos_frame_high0, vel=20, acc=50)
+            # ==========================================
+            # [예외 처리 추가] 액자가 정상적으로 잡혔는지 확인
+            # ==========================================
+            time.sleep(0.5)
+            current_width = get_gripper_width()  # 현재 그리퍼 폭 읽기
+            MIN_FRAME_WIDTH = 15.0  # 허용되는 최소 액자 두께 (mm) - 액자 실제 두께에 맞춰 수정하세요!
 
-        time.sleep(0.05)
-        movej(pos_frame_high1, vel = 100, acc = 50)
+            if current_width is not None and current_width < MIN_FRAME_WIDTH:
+                node.get_logger().error(f":경고: 예외 발생: 액자가 파지되지 않았습니다! (현재 폭: {current_width}mm)")
+                gripper_open() # 안전을 위해 다시 열기
+                movel(pos_frame_highstart_hover, vel=30, acc=50) # 홈 위치로 원복
 
-        time.sleep(0.05)
-        movel(pos_frame_high2, vel = [100,100], acc = [50,50], mod = 0)
-        time.sleep(0.05)
-        gripper_open()
-        time.sleep(0.5)
+                node.get_logger().info("작업을 중단합니다. 액자를 제자리에 놓아주세요.")
+                time.sleep(10)
+                continue # 실무에선 hmi 경고창 종료시까지 대기 후 이어서 진행할것
+            elif current_width is not None:
+                node.get_logger().info(f":흰색_확인_표시: 액자 파지 확인 완료. (현재 폭: {current_width}mm)")
+            else:
+                node.get_logger().warning("그리퍼 폭 센서를 읽을 수 없지만 작업을 계속 진행합니다.")
+            # ==========================================
 
-        # 홈위치 복귀
-        movel(pos_frame_high3, vel = [100,100], acc = [50,50], mod = 0)
-        time.sleep(0.05)
-        movel(pos_frame_high4, vel = [100,100], acc = [50,50], mod = 0)
-        time.sleep(0.05)
-        movej(home_pos, vel = 70, acc = 50)
+            time.sleep(0.1)
+            movel(pos_frame_highstart_hoverx, vel = [100,100], acc = [50,50])
+
+            # time.sleep(0.05)
+            # movej(pos_frame_high0, vel=20, acc=50)
+
+            time.sleep(0.05)
+            movel(pos_frame_high1, vel = [100,100], acc = [50,50])
+
+            time.sleep(0.05)
+            movel(pos_frame_high2, vel = [100,100], acc = [50,50], mod = 0)
+            time.sleep(0.05)
+            gripper_open()
+            time.sleep(0.5)
+
+            # 홈위치 복귀
+            movel(pos_frame_high3, vel = [100,100], acc = [50,50], mod = 0)
+            time.sleep(0.05)
+            movel(pos_frame_high4, vel = [100,100], acc = [50,50], mod = 0)
+            time.sleep(0.05)
+            movej(home_pos, vel = 70, acc = 50)
+            node.get_logger().info("--- 액자 파지 및 배치 작업 완료 ---")
+            return True
 
 
     def Calibration_frame():
@@ -195,9 +261,13 @@ def main(args=None):
         pos_paper_calx2 = posx(166.30, 3.09, 291.14, 48.36, 179.93, -41.67)
 
 
-        pos_paper_caly0 = posx(286.07, 158.74, 340.07, 68.05, 179.95, -21.99) # -y방향으로
-        pos_paper_caly1 = posx(286.07, 158.74, 290.07, 68.05, 179.95, -21.99) # -y방향으로
-        pos_paper_caly2 = posx(286.07, 101.20, 290.07, 68.05, 179.95, -21.99)
+        # pos_paper_caly0 = posx(286.07, 158.74, 340.07, 68.05, 179.95, -21.99) # -y방향으로
+        # pos_paper_caly1 = posx(286.07, 158.74, 290.07, 68.05, 179.95, -21.99) # -y방향으로
+        # pos_paper_caly2 = posx(286.07, 101.20, 290.07, 68.05, 179.95, -21.99)
+
+        pos_paper_caly0 = posx(286.07, 158.74, 340.07, 68.05, 179.95, 159.14) # -y방향으로
+        pos_paper_caly1 = posx(286.07, 158.74, 290.07, 68.05, 179.95, 159.14) # -y방향으로
+        pos_paper_caly2 = posx(286.07, 101.20, 290.07, 68.05, 179.95, 159.14)
 
 
 
@@ -264,31 +334,63 @@ def main(args=None):
         pinch_ready_pos1 = posx(554.45, 403.11, 103.32, 91.36, -90.00, 180.00)
         pinch_ready_pos2 = posx(554.45, 383.14, 103.32, 91.36, -90.00, -180.00)
 
+        hover_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2]+20, pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
+        ready_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2]+2, pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
         
         # ==========================================
         # 단계 1. 종이 누르고 절벽(더미 밖)으로 밀기
         # ==========================================
         # 시작전 홈위치 이동
-        node.get_logger().info("--- [1] 종이 슬라이딩 시작 ---")
-        
-        # 1. 종이 상공으로 이동
-        hover_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2]+30, pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
-        time.sleep(0.05)
-        movel(hover_pos, vel = [100,100], acc = [50,50], mod = 0)
-        time.sleep(0.05)
-        gripper_close()
-        time.sleep(0.05)
-        # 2. 종이 표면으로 하강
-        ready_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2], pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
-        movel(ready_pos, vel=30, acc=50, mod = 0)
+
+        while rclpy.ok():
+
+            node.get_logger().info("--- [1] 종이 슬라이딩 시작 ---")
+            
+            # 1. 종이 상공으로 이동
+            time.sleep(0.05)
+            movel(hover_pos, vel = [100,100], acc = [50,50], mod = 0)
+            time.sleep(0.05)
+            gripper_close()
+            time.sleep(0.05)
+            # 2. 종이 표면으로 하강
+            movel(ready_pos, vel=30, acc=50, mod = 0)
 
 
-        # 3. Z축 힘 제어 켜기 (5N으로 누르기)
-        task_compliance_ctrl(stx=[500, 500, 500, 100, 100, 100])
-        time.sleep(0.5)
-        set_desired_force(fd=[0, 0, -3, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
-        time.sleep(2)
-        node.get_logger().info("힘제어 시작")
+            # 3. Z축 힘 제어 켜기 (5N으로 누르기)
+            task_compliance_ctrl(stx=[500, 500, 500, 100, 100, 100])
+            time.sleep(0.5)
+            set_desired_force(fd=[0, 0, -3, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
+            time.sleep(2)
+            node.get_logger().info("힘제어 시작")
+
+            # ==========================================
+            # :경광등: [예외 처리] 현재 Z 높이를 확인하여 종이 소진 판별
+            # ==========================================
+            # 현재 로봇의 위치(TCP)를 Base 좌표계 기준으로 가져옵니다.
+            current_pos, _ = get_current_posx(ref=DR_BASE)
+            current_z = current_pos[2] # X, Y, Z, Rx, Ry, Rz 중 세 번째 값(Z)
+
+            # 바닥(트레이) 높이보다 살짝 높은 값을 임계값으로 설정합니다.
+            # (예: 바닥이 330.0mm라면 종이 1~2장 두께를 고려해 332.0mm로 설정)
+            MIN_PAPER_Z = 324.0
+
+            node.get_logger().info(f"현재 Z 높이: {current_z:.2f}mm")
+
+            if current_z < MIN_PAPER_Z:
+                node.get_logger().error(f":경고: 예외 발생: 종이가 없습니다! (현재 Z: {current_z:.2f}mm < {MIN_PAPER_Z}mm)")
+
+                # 1. 안전을 위해 힘 제어 및 컴플라이언스 제어 즉시 해제
+                release_force()
+                time.sleep(0.1)
+                release_compliance_ctrl()
+                time.sleep(0.5)
+
+                # 2. 로봇을 종이 위(충돌 없는 안전한 상공)로 들어올리기
+                movel(hover_pos, vel=50, acc=50, mod=0)
+                time.sleep(10)
+
+                continue
+            break
         
         # 4. 종이를 절벽 끝 방향으로 밀기
         move_pos = posx(pos_cliff_edge[0], pos_cliff_edge[1], pos_cliff_edge[2], pos_cliff_edge[3], pos_cliff_edge[4], pos_cliff_edge[5])
@@ -375,20 +477,64 @@ def main(args=None):
 
         gripper_open()
         time.sleep(0.05)
-        movel(pos_frameout1_hover, vel = [100,100], acc = [50,50])
+        movel(pos_framefinal_hover, vel = [100,100], acc = [50,50])
 
     def pencil_grip():
+        # 위치 변수들은 루프 밖에서 한 번만 선언
         pencil_high = 306.71
         pos_pencilcase_up = posx(477.01, -163.54, pencil_high + 150, 70.21, 179.94, -107.98)
         pos_pencilcase_down = posx(477.02, -163.54, pencil_high, 65.91, 179.94, -112.28)
         pos_pencilcase_home = posx(526.83, 54.46, 506.64, 62.97, 179.94, -117.13)
-        gripper_open()
 
-        movel(pos_pencilcase_up, vel = [100,100], acc = [50,50], mod = 0)
-        movel(pos_pencilcase_down, vel = [100,100], acc = [50,50], mod = 0)
-        gripper_close()
-        movel(pos_pencilcase_up, vel = [100,100], acc = [50,50], mod = 0)
-        movel(pos_pencilcase_home, vel = [100,100], acc = [50,50], mod = 0)
+        while True:
+            node.get_logger().info("--- 연필 파지 시작 ---")
+            gripper_open()
+            time.sleep(0.05)
+
+            # 1. 연필통 상공으로 이동
+            movel(pos_pencilcase_up, vel = [100,100], acc = [50,50], mod = 0)
+            time.sleep(0.05)
+            
+            # 2. 연필 파지 위치로 하강
+            movel(pos_pencilcase_down, vel = [100,100], acc = [50,50], mod = 0)
+            time.sleep(0.05)
+            
+            # 3. 그리퍼 닫기
+            gripper_close()
+            time.sleep(0.5) # 그리퍼가 완전히 닫힐 때까지 대기
+
+            # ==========================================
+            # [예외 처리] 연필이 정상적으로 잡혔는지 확인
+            # ==========================================
+            current_width = get_gripper_width()
+            MIN_PENCIL_WIDTH = 15.0  # 허용되는 최소 연필 두께 (mm) - 실제 연필 두께에 맞춰 수정하세요!
+
+            if current_width is not None and current_width < MIN_PENCIL_WIDTH:
+                node.get_logger().error(f"경고: 연필이 파지되지 않았습니다! (현재 폭: {current_width}mm)")
+                
+                # 안전을 위해 그리퍼를 열고 상공으로 대피
+                gripper_open()
+                movel(pos_pencilcase_up, vel=[100, 100], acc=[50, 50], mod=0)
+                
+                node.get_logger().info("작업을 다시 시도합니다. (2초 후 재시작)")
+                time.sleep(10.0) # 무한 재시도 방지를 위한 쿨타임
+                continue # 루프 처음으로 돌아가서 재시작
+
+            elif current_width is not None:
+                node.get_logger().info(f"연필 파지 확인 완료. (현재 폭: {current_width}mm)")
+            else:
+                node.get_logger().warning("그리퍼 폭 센서를 읽을 수 없지만 작업을 계속 진행합니다.")
+            # ==========================================
+
+            # 파지에 성공했을 경우 남은 동작 수행
+            time.sleep(0.05)
+            movel(pos_pencilcase_up, vel = [100,100], acc = [50,50], mod = 0)
+            
+            time.sleep(0.05)
+            movel(pos_pencilcase_home, vel = [100,100], acc = [50,50], mod = 0)
+            
+            node.get_logger().info("--- 연필 파지 및 홈 이동 완료 ---")
+            return True # 작업이 성공적으로 끝났으므로 루프 탈출 및 함수 종료
 
 
 
@@ -410,12 +556,12 @@ def main(args=None):
     # ==========================================
 
     node.get_logger().info("로봇 테스크 시작")
-    # frame_lower_setup()
-    # slide_and_pinch_paper()
+    frame_lower_setup()
+    slide_and_pinch_paper()
     Calibration_frame() 
     frame_high_setup()
-    # Calibration_frame()
-    # frameout()
+    Calibration_frame()
+    frameout()
 
     # 노드 종료 처리
     rclpy.shutdown()
