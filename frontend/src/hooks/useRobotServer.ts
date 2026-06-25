@@ -16,6 +16,12 @@ export interface RobotConnInfo {
   protocol: string;
 }
 
+export interface RobotState {
+  status: 'IDLE' | 'RUNNING' | 'ERROR'; // 에러 상태 추가
+  error_message?: string;               // 에러 메시지 추가
+  // ... 기존 상태들
+}
+
 export interface CalibrateZResult {
   contact_z : number;
   pen_up_z  : number;
