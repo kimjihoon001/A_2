@@ -320,19 +320,19 @@ def main(args=None):
     def slide_and_pinch_paper():
 
         # 1. 종이 더미의 중앙 좌표 (그리퍼가 바닥을 향한 자세: Rx=0, Ry=180, Rz=0)
-        pos_paper_center = posx(547.03, 75.97, 334.62, 9.86, 180.00, 98.32) 
+        pos_paper_center = posx(563.03, 75.97, 328.62, 9.86, 180.00, 98.32) 
         
         # 2. 절벽 끝단 좌표
-        pos_cliff_edge = posx(547.03, 120.97, 334.63, 179.99, 180.00, -91.36) 
+        pos_cliff_edge = posx(563.03, 120.97, 328.63, 179.99, 180.00, -91.36) 
         
         # 3. 액자 위치 좌표
         pos_frame_paper_prepare = posx(288.95, 239.42, 444.60, 91, -135.9, 179)#안전위치
         pos_frame_paper0 = posx(288.97, 190, 367.05, 91.03, -135.90, 178.99)#종이배치위치1
 
         # 종이 파지 위치 5단계
-        pinch_ready_pos0 = posx(554.45, 403.09, 193.32, 91.36, -90.00, 180.00)
-        pinch_ready_pos1 = posx(554.45, 403.11, 103.32, 91.36, -90.00, 180.00)
-        pinch_ready_pos2 = posx(554.45, 383.14, 103.32, 91.36, -90.00, -180.00)
+        pinch_ready_pos0 = posx(565.45, 403.09, 193.32, 91.36, -90.00, 180.00)
+        pinch_ready_pos1 = posx(565.45, 403.11, 103.32, 91.36, -90.00, 180.00)
+        pinch_ready_pos2 = posx(565.45, 383.14, 103.32, 91.36, -90.00, 180.00)
 
         hover_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2]+20, pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
         ready_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2]+2, pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
@@ -359,7 +359,7 @@ def main(args=None):
             # 3. Z축 힘 제어 켜기 (5N으로 누르기)
             task_compliance_ctrl(stx=[500, 500, 500, 100, 100, 100])
             time.sleep(0.5)
-            set_desired_force(fd=[0, 0, -3, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
+            set_desired_force(fd=[0, 0, -2, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
             time.sleep(2)
             node.get_logger().info("힘제어 시작")
 
@@ -419,7 +419,7 @@ def main(args=None):
         time.sleep(0.05)
         movel(pinch_ready_pos1, vel = [100,100], acc = [50,50])
         time.sleep(0.05)
-        movel(pinch_ready_pos2, vel = [100,100], acc = [50,50])
+        movel(pinch_ready_pos2, vel = [50,50], acc = [50,50])
         time.sleep(0.05)
 
         # 9. 그리퍼 닫아서 종이 꼬집기
