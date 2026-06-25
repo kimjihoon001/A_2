@@ -38,7 +38,7 @@ function etaStr(drawingState: DrawingState): string {
 }
 
 export default function Dashboard({ robotState, history, alarms, drawingState, ros2Connected }: Props) {
-  const { status, joints, speed, tcpX, tcpY, tcpZ, penForce } = robotState;
+  const { status, joints, tcpX, tcpY, tcpZ, penForce } = robotState;
   const drawProgress = drawingState.totalPixels > 0
     ? Math.round((drawingState.currentPixel / drawingState.totalPixels) * 100) : 0;
   const isRunning = drawingState.status === 'running';
@@ -52,7 +52,7 @@ export default function Dashboard({ robotState, history, alarms, drawingState, r
       <h2 style={{ marginBottom: 20, fontSize: 20, fontWeight: 700 }}>대시보드</h2>
 
       {/* 상단 5개 stat 카드 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 14, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 20 }}>
         <StatCard
           label="로봇 상태"
           value={!ros2Connected ? '미연결' : (STATUS_LABEL[status] ?? status)}
@@ -64,12 +64,6 @@ export default function Dashboard({ robotState, history, alarms, drawingState, r
           value={`${drawProgress}%`}
           color="var(--accent)"
           sub={isRunning ? `${drawingState.currentPixel.toLocaleString()} / ${drawingState.totalPixels.toLocaleString()} px` : '대기 중'}
-        />
-        <StatCard
-          label="TCP 속도"
-          value={`${speed} mm/s`}
-          color="var(--yellow)"
-          sub={isRunning ? '이동 중' : '정지'}
         />
         <StatCard
           label="현재 힘"
@@ -146,12 +140,11 @@ export default function Dashboard({ robotState, history, alarms, drawingState, r
         {/* TCP 좌표 + 관절 */}
         <div className="card">
           <div className="card-title">TCP 위치 / 관절</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
             {[
-              { l: 'X',  v: `${tcpX.toFixed(1)} mm`, c: 'var(--text)' },
-              { l: 'Y',  v: `${tcpY.toFixed(1)} mm`, c: 'var(--text)' },
-              { l: 'Z',  v: `${tcpZ.toFixed(1)} mm`, c: 'var(--text)' },
-              { l: '속도', v: `${speed} mm/s`,        c: 'var(--yellow)' },
+              { l: 'X', v: `${tcpX.toFixed(1)} mm`, c: 'var(--text)' },
+              { l: 'Y', v: `${tcpY.toFixed(1)} mm`, c: 'var(--text)' },
+              { l: 'Z', v: `${tcpZ.toFixed(1)} mm`, c: 'var(--text)' },
             ].map(({ l, v, c }) => (
               <div key={l} style={{ background: 'var(--panel2)', borderRadius: 6, padding: '10px 10px' }}>
                 <div style={{ fontSize: 10, color: 'var(--text2)', marginBottom: 3 }}>{l}</div>
@@ -176,20 +169,10 @@ export default function Dashboard({ robotState, history, alarms, drawingState, r
           ))}
         </div>
 
-        {/* 힘/속도 추이 차트 */}
+        {/* 힘 추이 차트 */}
         <div className="card">
-          <div className="card-title">TCP 속도 추이 (mm/s)</div>
-          <ResponsiveContainer width="100%" height={120}>
-            <LineChart data={history}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="t" tick={{ fontSize: 10, fill: 'var(--text2)' }} interval="preserveStartEnd" />
-              <YAxis tick={{ fontSize: 10, fill: 'var(--text2)' }} />
-              <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }} />
-              <Line type="monotone" dataKey="speed" stroke="var(--accent)" strokeWidth={2} dot={false} name="속도(mm/s)" />
-            </LineChart>
-          </ResponsiveContainer>
-          <div className="card-title" style={{ marginTop: 12 }}>힘 추이 (N)</div>
-          <ResponsiveContainer width="100%" height={100}>
+          <div className="card-title">힘 추이 (N)</div>
+          <ResponsiveContainer width="100%" height={220}>
             <LineChart data={history}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="t" tick={{ fontSize: 10, fill: 'var(--text2)' }} interval="preserveStartEnd" />

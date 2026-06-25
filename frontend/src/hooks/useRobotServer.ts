@@ -148,5 +148,12 @@ export function useRobotServer(url: string, callbacks: ServerCallbacks = {}) {
     saveSettings  : (data: object) => send({ cmd: 'save_settings', data }),
     calibrateZ    : ()          => send({ cmd: 'calibrate_z' }),
     frameTask     : ()          => send({ cmd: 'frame_task' }),
+    // axis: 6=X, 7=Y, 8=Z (task space BASE), speed: % (+ 전진 / 0 정지 / - 후진)
+    jogStart      : (axis: number, speed: number) => send({ cmd: 'jog', axis, speed }),
+    jogStop       : (axis: number)                => send({ cmd: 'jog', axis, speed: 0 }),
+    // vector: float[6] 단위벡터 [Tx,Ty,Tz,Rx,Ry,Rz], speed: % (0=정지)
+    jogMultiStart : (vector: number[], speed: number) => send({ cmd: 'jog_multi', vector, speed }),
+    jogMultiStop  : ()                                => send({ cmd: 'jog_multi', vector: [0,0,0,0,0,0], speed: 0 }),
+    setRobotMode  : (mode: number)               => send({ cmd: 'set_robot_mode', mode }),
   };
 }
