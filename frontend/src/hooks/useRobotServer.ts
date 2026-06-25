@@ -8,7 +8,7 @@
 // ================================================================
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import type { PixelPoint, ArtSettings, RobotState } from '../types';
+import type { PixelPoint, ArtSettings} from '../types';
 
 export interface RobotConnInfo {
   ip: string;
