@@ -756,6 +756,37 @@ class RobotController:
             with self._lock:
                 self.state.pen_force = 0.0
 
+    def nudge_y(self):
+        """Y방향으로 잠깐 힘을 가해 펜 위치를 미세 조정 (Z 측정 재시도 전 호출)"""
+        if not _dsr_available:
+            return
+        task_compliance_ctrl    = _dsr_funcs['task_compliance_ctrl']
+        set_desired_force       = _dsr_funcs['set_desired_force']
+        release_force           = _dsr_funcs['release_force']
+        release_compliance_ctrl = _dsr_funcs['release_compliance_ctrl']
+        DR_FC_MOD_REL           = _dsr_funcs['DR_FC_MOD_REL']
+
+        task_compliance_ctrl([3000, 30, 3000, 100, 100, 100])
+        time.sleep(0.2)
+        set_desired_force([0, -3.0, 0, 0, 0, 0], dir=[0, 1, 0, 0, 0, 0], mod=DR_FC_MOD_REL)
+        time.sleep(1.0)
+        release_force()
+        time.sleep(0.1)
+        release_compliance_ctrl()
+        time.sleep(0.3)
+        log.info("Y방향 nudge 완료")
+
+    def move_to_xy(self, rx: float, ry: float, z_up: float):
+        """지정 X,Y로 안전 Z 높이에서 이동 (Z 측정 전 위치 이동용)"""
+        if not _dsr_available:
+            return
+        posx  = _dsr_funcs['posx']
+        movel = _dsr_funcs['movel']
+        DR_BASE = _dsr_funcs['DR_BASE']
+        target = posx(rx, ry, z_up, 0, 180, 0)
+        movel(target, vel=[self._move_speed, self._move_speed],
+              acc=[self._move_speed * 2, self._move_speed * 2], ref=DR_BASE)
+
     # ── 자동 Z 캘리브레이션 ──────────────────────────────────────
     def auto_calibrate_z(self) -> dict:
         """
@@ -839,6 +870,309 @@ class RobotController:
         w = _gripper_read_width()
         with self._lock:
             self.state.gripper_width = w if w is not None else GRIPPER_CLOSE_WIDTH
+
+    def pencil_grip(self):
+        """연필통에서 연필 파지 (T4_robottask 좌표 그대로)"""
+        if not _dsr_available:
+            log.info("[시뮬] pencil_grip")
+            return
+        movel = _dsr_funcs['movel']
+        posx  = _dsr_funcs['posx']
+
+        pencil_high = 306.71
+        pos_up   = posx(477.01, -163.54, pencil_high + 150, 70.21, 179.94, -107.98)
+        pos_down = posx(477.02, -163.54, pencil_high,        65.91, 179.94, -112.28)
+        pos_home = posx(526.83,   54.46, 506.64,             62.97, 179.94, -117.13)
+
+        while True:
+            if self.state.estop:
+                log.warning("E-STOP — pencil_grip 중단")
+                return
+            log.info("연필 파지 시작")
+            self.gripper_open()
+
+            if self.state.estop: return
+            movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
+            if self.state.estop: return
+            movel(pos_down, vel=[100, 100], acc=[50, 50], mod=0)
+            if self.state.estop: return
+            self.gripper_close()
+
+            current_width = _gripper_read_width()
+            if current_width is not None and current_width < 15.0:
+                log.error(f"연필 파지 실패 (폭={current_width}mm) — 재시도")
+                self.gripper_open()
+                movel(pos_up, vel=[100, 100], acc=[50, 50], mod=0)
+                time.sleep(10.0)
+                continue
+
+            log.info(f"연필 파지 완료 (폭={current_width}mm)")
+            if self.state.estop: return
+            movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
+            if self.state.estop: return
+            movel(pos_home, vel=[100, 100], acc=[50, 50], mod=0)
+            log.info("연필 홈 이동 완료")
+            return
+
+    def pencil_release(self):
+        """연필을 연필통에 반납 (T4_robottask 좌표 그대로)"""
+        if not _dsr_available:
+            log.info("[시뮬] pencil_release")
+            return
+        movel = _dsr_funcs['movel']
+        posx  = _dsr_funcs['posx']
+
+        pencil_high = 306.71
+        pos_up   = posx(477.01, -163.54, pencil_high + 150, 70.21, 179.94, -107.98)
+        pos_down = posx(477.02, -163.54, pencil_high,        65.91, 179.94, -112.28)
+        pos_home = posx(526.83,   54.46, 506.64,             62.97, 179.94, -117.13)
+
+        log.info("연필 반납 시작")
+        if self.state.estop:
+            log.warning("E-STOP — pencil_release 중단")
+            return
+        movel(pos_home, vel=[100, 100], acc=[50, 50], mod=0)
+        if self.state.estop: return
+        movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
+        if self.state.estop: return
+        movel(pos_down, vel=[100, 100], acc=[50, 50], mod=0)
+        self.gripper_open()
+        movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
+        log.info("연필 반납 완료")
+
+    def frame_assembly(self):
+        """그리기 완료 후 액자 조립 전체 시퀀스 (T4_robottask 좌표 그대로)"""
+        if not _dsr_available:
+            log.info("[시뮬] frame_assembly")
+            return
+
+        movel  = _dsr_funcs['movel']
+        movej  = _dsr_funcs['movej']
+        amovel = _dsr_funcs['amovel']
+        posx   = _dsr_funcs['posx']
+        posj   = _dsr_funcs['posj']
+        task_compliance_ctrl    = _dsr_funcs['task_compliance_ctrl']
+        set_desired_force       = _dsr_funcs['set_desired_force']
+        release_force           = _dsr_funcs['release_force']
+        release_compliance_ctrl = _dsr_funcs['release_compliance_ctrl']
+        get_current_posx        = _dsr_funcs['get_current_posx']
+        DR_FC_MOD_REL           = _dsr_funcs['DR_FC_MOD_REL']
+        DR_BASE                 = _dsr_funcs['DR_BASE']
+
+        def _chk():
+            if self.state.estop:
+                log.warning("E-STOP — frame_assembly 중단")
+                return False
+            return True
+
+        # ── 1. 액자 하판 배치 ────────────────────────────────────
+        log.info("액자 하판 배치 시작")
+        home_pos = posj(-0.01, 0.01, 90.00, 180.02, -89.98, 0)
+        pos_lowframe_start_hover  = posj(-17.09, -4.66, 71.34, 179.97, -113.32, 72.06)
+        pos_lowframe_start_hoverx = posx(291.95, -83.31, 569.94, 170.08, -180, 79.19)
+        pos_lowframe_start        = posx(291.95, -83.31, 352.89, 170.08, -180, 79.19)
+        pos_frame_lower1 = posj(60.82, 29.56, 80.77, 120.95, -144.29, 126.52)
+        pos_frame_lower2 = posx(269.77, 295.96,  74.64, 90.91, -89.97, -0.03)
+        pos_frame_lower3 = posx(269.77, 345.96,  74.64, 90.91, -89.97, -0.03)
+        pos_frame_lower4 = posx(269.77, 345.96, 174.64, 90.91, -89.97, -0.03)
+
+        self.gripper_open()
+        if not _chk(): return
+        movej(home_pos, vel=30, acc=50)
+
+        while not self.state.estop:
+            if not _chk(): return
+            movej(pos_lowframe_start_hover, vel=100, acc=50)
+            if not _chk(): return
+            movel(pos_lowframe_start, vel=[100, 100], acc=[50, 50])
+            self.gripper_close()
+            time.sleep(0.5)
+            w = _gripper_read_width()
+            if w is not None and w < 15.0:
+                log.error(f"액자 하판 파지 실패 (폭={w}mm) — 재시도")
+                self.gripper_open()
+                movej(pos_lowframe_start_hover, vel=30, acc=50)
+                time.sleep(10)
+                continue
+            log.info(f"액자 하판 파지 완료 (폭={w}mm)")
+            if not _chk(): return
+            movel(pos_lowframe_start_hoverx, vel=[100, 100], acc=[50, 50])
+            if not _chk(): return
+            movej(pos_frame_lower1, vel=100, acc=50)
+            if not _chk(): return
+            movel(pos_frame_lower2, vel=[100, 100], acc=[30, 30], mod=0)
+            self.gripper_open()
+            time.sleep(0.5)
+            movel(pos_frame_lower3, vel=[100, 100], acc=[50, 50], mod=0)
+            movel(pos_frame_lower4, vel=[100, 100], acc=[50, 50], mod=0)
+            if not _chk(): return
+            movej(home_pos, vel=100, acc=50)
+            break
+
+        # ── 2. 종이 슬라이딩 & 픽업 ─────────────────────────────
+        log.info("종이 픽업 시작")
+        pos_paper_center       = posx(547.03,  75.97, 334.62,   9.86, 180.00,  98.32)
+        pos_cliff_edge         = posx(547.03, 120.97, 334.63, 179.99, 180.00, -91.36)
+        pos_frame_paper_prepare= posx(288.95, 239.42, 444.60,  91, -135.9, 179)
+        pos_frame_paper0       = posx(288.97, 190,    367.05,  91.03, -135.90, 178.99)
+        pinch_ready_pos0 = posx(554.45, 403.09, 193.32, 91.36, -90.00,  180.00)
+        pinch_ready_pos1 = posx(554.45, 403.11, 103.32, 91.36, -90.00,  180.00)
+        pinch_ready_pos2 = posx(554.45, 383.14, 103.32, 91.36, -90.00, -180.00)
+        hover_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2]+20,
+                         pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
+        ready_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2]+2,
+                         pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
+
+        while not self.state.estop:
+            if not _chk(): return
+            movel(hover_pos, vel=[100, 100], acc=[50, 50], mod=0)
+            self.gripper_close()
+            if not _chk(): return
+            movel(ready_pos, vel=30, acc=50, mod=0)
+            task_compliance_ctrl(stx=[500, 500, 500, 100, 100, 100])
+            time.sleep(0.5)
+            set_desired_force(fd=[0, 0, -3, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
+            time.sleep(2)
+            current_pos, _ = get_current_posx(ref=DR_BASE)
+            if current_pos[2] < 324.0:
+                log.error(f"종이 없음 (Z={current_pos[2]:.1f}mm)")
+                release_force()
+                time.sleep(0.1)
+                release_compliance_ctrl()
+                movel(hover_pos, vel=50, acc=50, mod=0)
+                time.sleep(10)
+                continue
+            break
+
+        if not _chk(): return
+        move_pos = posx(pos_cliff_edge[0], pos_cliff_edge[1], pos_cliff_edge[2],
+                        pos_cliff_edge[3], pos_cliff_edge[4], pos_cliff_edge[5])
+        amovel(move_pos, vel=30, acc=50, mod=0, ref=0)
+        time.sleep(3)
+        release_force()
+        time.sleep(0.5)
+        release_compliance_ctrl()
+        movel(posx(pos_cliff_edge[0], pos_cliff_edge[1], pos_cliff_edge[2]+100,
+                   pos_cliff_edge[3], pos_cliff_edge[4], pos_cliff_edge[5]), vel=100, acc=100)
+        self.gripper_open()
+        if not _chk(): return
+        movel(pinch_ready_pos0, vel=[100, 100], acc=[50, 50])
+        movel(pinch_ready_pos1, vel=[100, 100], acc=[50, 50])
+        movel(pinch_ready_pos2, vel=[100, 100], acc=[50, 50])
+        self.gripper_close()
+        movel(pinch_ready_pos0, vel=[100, 100], acc=[50, 50])
+        if not _chk(): return
+        movel(pos_frame_paper_prepare, vel=[100, 100], acc=[50, 50])
+        movel(pos_frame_paper0,        vel=[100, 100], acc=[50, 50])
+        self.gripper_open()
+        time.sleep(2)
+        pos_paper_release0 = posx(0, 0, 0, 90, -40, -90)
+        amovel(pos_paper_release0, vel=[20.0, 20.0], acc=[10.0, 10.0], mod=1, ref=0)
+        time.sleep(3)
+        log.info("종이 픽업 완료")
+
+        # ── 3. 캘리브레이션 (공통 — 2회 호출) ──────────────────
+        def _calibration_frame():
+            pos_paper_caly0 = posx(286.07, 158.74, 340.07, 68.05, 179.95, 159.14)
+            pos_paper_caly1 = posx(286.07, 158.74, 290.07, 68.05, 179.95, 159.14)
+            pos_paper_caly2 = posx(286.07, 101.20, 290.07, 68.05, 179.95, 159.14)
+            pos_paper_calx0 = posx(136.30,   3.09, 341.14, 48.36, 179.93, -41.67)
+            pos_paper_calx1 = posx(136.30,   3.09, 291.14, 48.36, 179.93, -41.67)
+            pos_paper_calx2 = posx(166.30,   3.09, 291.14, 48.36, 179.93, -41.67)
+
+            if not _chk(): return
+            self.gripper_close()
+            movel(pos_paper_caly0, vel=100, acc=50)
+            movel(pos_paper_caly1, vel=100, acc=50)
+            task_compliance_ctrl(stx=[100, 3000, 3000, 100, 100, 100])
+            time.sleep(0.5)
+            amovel(pos_paper_caly2, vel=[30, 30], acc=[30, 30], ref=0, mod=0)
+            time.sleep(3)
+            release_compliance_ctrl()
+            movel(pos_paper_caly1, vel=100, acc=50)
+            movel(pos_paper_caly0, vel=100, acc=50)
+            if not _chk(): return
+            movel(pos_paper_calx0, vel=100, acc=50)
+            movel(pos_paper_calx1, vel=100, acc=50)
+            task_compliance_ctrl(stx=[100, 3000, 3000, 100, 100, 100])
+            time.sleep(0.5)
+            amovel(pos_paper_calx2, vel=[30, 30], acc=[30, 30], ref=0, mod=0)
+            time.sleep(3)
+            release_force()
+            time.sleep(0.5)
+            release_compliance_ctrl()
+            movel(pos_paper_calx1, vel=100, acc=50)
+            movel(pos_paper_calx0, vel=100, acc=50)
+            log.info("캘리브레이션 완료")
+
+        log.info("캘리브레이션 1차")
+        _calibration_frame()
+
+        # ── 4. 액자 상판 배치 ────────────────────────────────────
+        log.info("액자 상판 배치 시작")
+        pos_frame_highstart_hover  = posx(295.35, -127.08, 583.96, 70.24, 179.95, -19.80)
+        pos_frame_highstart        = posx(295.36, -127.08, 347.73, 67.75, 179.95, -22.29)
+        pos_frame_high1 = posx(274.49, 328.02, 231.75, 90.06, -90.00, 0.00)
+        pos_frame_high2 = posx(274.49, 328.02,  81.75, 90.06, -90.00, 0.00)
+        pos_frame_high3 = posx(274.49, 378.02,  81.75, 90.06, -90.00, 0.00)
+        pos_frame_high4 = posx(274.49, 378.02, 181.75, 90.06, -90.00, 0.00)
+        home_pos2 = posj(-0.01, 0.01, 90.00, 180.02, -89.98, 0)
+
+        while not self.state.estop:
+            self.gripper_open()
+            if not _chk(): return
+            movel(pos_frame_highstart_hover, vel=100, acc=50)
+            if not _chk(): return
+            movel(pos_frame_highstart, vel=[100, 100], acc=[50, 50])
+            self.gripper_close()
+            time.sleep(0.5)
+            w = _gripper_read_width()
+            if w is not None and w < 15.0:
+                log.error(f"액자 상판 파지 실패 (폭={w}mm) — 재시도")
+                self.gripper_open()
+                movel(pos_frame_highstart_hover, vel=30, acc=50)
+                time.sleep(10)
+                continue
+            log.info(f"액자 상판 파지 완료 (폭={w}mm)")
+            if not _chk(): return
+            movel(pos_frame_highstart_hover, vel=[100, 100], acc=[50, 50])
+            movel(pos_frame_high1,           vel=[100, 100], acc=[50, 50])
+            movel(pos_frame_high2,           vel=[100, 100], acc=[50, 50], mod=0)
+            self.gripper_open()
+            time.sleep(0.5)
+            movel(pos_frame_high3, vel=[100, 100], acc=[50, 50], mod=0)
+            movel(pos_frame_high4, vel=[100, 100], acc=[50, 50], mod=0)
+            if not _chk(): return
+            movej(home_pos2, vel=70, acc=50)
+            break
+
+        # ── 5. 캘리브레이션 2차 ──────────────────────────────────
+        log.info("캘리브레이션 2차")
+        _calibration_frame()
+
+        # ── 6. 액자 배출 ─────────────────────────────────────────
+        log.info("액자 배출 시작")
+        pos_frameout0          = posx(281.78, 288.83,  80.12, 90, -90, 0)
+        pos_frameout1          = posx(281.78, 340.83,  80.12, 90, -90, 0)
+        pos_frameout1_hover    = posx(281.78, 340.83, 300.12, 90, -90, 0)
+        pos_framefinal         = posx(420,     51.77, 349.94,  7.48, 179.48, -173.96)
+        pos_framefinal_hover   = posx(420,     51.77, 549.94,  7.48, 179.48, -173.96)
+        home_pos3 = posj(-0.01, 0.01, 90.00, 180.02, -89.98, 0)
+
+        if not _chk(): return
+        movej(home_pos3, vel=100, acc=50)
+        self.gripper_open()
+        movel(pos_frameout1_hover, vel=[100, 100], acc=[50, 50])
+        movel(pos_frameout1,       vel=[100, 100], acc=[50, 50])
+        movel(pos_frameout0,       vel=[100, 100], acc=[50, 50])
+        self.gripper_close()
+        if not _chk(): return
+        movel(pos_frameout1_hover, vel=[100, 100], acc=[50, 50])
+        movel(pos_framefinal_hover,vel=[100, 100], acc=[50, 50])
+        movel(pos_framefinal,      vel=[100, 100], acc=[50, 50])
+        self.gripper_open()
+        movel(pos_framefinal_hover,vel=[100, 100], acc=[50, 50])
+        log.info("액자 조립 전체 완료")
 
     # ── 상태 조회 ────────────────────────────────────────────────
     def _sync_state_from_robot(self):

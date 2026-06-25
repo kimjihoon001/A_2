@@ -8,11 +8,10 @@ interface Props {
   onPause: () => void;
   onResume: () => void;
   onGoHome: () => void;
-  onFrameTask: () => void;
   addLog: (msg: string) => void;
 }
 
-export default function DrawingControl({ drawingState, robotState, onStop, onPause, onResume, onGoHome, onFrameTask, addLog }: Props) {
+export default function DrawingControl({ drawingState, robotState, onStop, onPause, onResume, onGoHome, addLog }: Props) {
   const {
     status, currentPixel, totalPixels, resWidth,
     currentGray, targetForce, currentPenForce,
@@ -75,11 +74,6 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
             style={{ width: '100%' }}
             onClick={() => { onGoHome(); addLog('[관리자] 원점 복귀'); }}>
             원점복귀
-          </button>
-          <button className="btn-outline" disabled={isActive}
-            style={{ width: '100%', borderColor: 'var(--accent2)', color: 'var(--accent2)' }}
-            onClick={() => { onFrameTask(); addLog('[관리자] 액자 작업 시작'); }}>
-            액자 작업
           </button>
         </div>
       </div>

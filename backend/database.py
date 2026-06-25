@@ -116,7 +116,7 @@ class Database:
                     (name, origin_x, origin_y, origin_z,
                      pen_down_z, pixel_spacing_mm,
                      canvas_width_mm, canvas_height_mm, is_active)
-                VALUES ('default', 653.5, 187.19, 360.58, 359.58, 2.0, 210.0, 148.0, 1)
+                VALUES ('default', 462.0, -16.0, 360.58, 359.58, 2.0, 210.0, 148.0, 1)
             """)
 
     # ── Jobs ────────────────────────────────────────────────────

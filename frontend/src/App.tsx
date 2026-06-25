@@ -304,7 +304,6 @@ export default function App() {
         onPause={handlePause}
         onResume={handleResume}
         onGoHome={handleGoHome}
-        onFrameTask={() => { if (serverConnected) server.frameTask(); addLog('[관리자] 액자 작업 시작'); }}
         addLog={addLog}
       />
     ),
@@ -318,13 +317,13 @@ export default function App() {
           if (serverConnected) server.saveCalibration(data);
         }}
         savedCalib={calibration}
-        onCalibrateZ={() => { if (serverConnected) server.calibrateZ(); }}
-        calibratedZ={calibratedZ}
         onJogStart={(axis, speed) => { if (serverConnected) server.jogStart(axis, speed); }}
         onJogStop={(axis) => { if (serverConnected) server.jogStop(axis); }}
         onJogMultiStart={(vec, speed) => { if (serverConnected) server.jogMultiStart(vec, speed); }}
         onJogMultiStop={() => { if (serverConnected) server.jogMultiStop(); }}
         onSetRobotMode={(mode) => { if (serverConnected) server.setRobotMode(mode); }}
+        onGripperOpen={() => { if (serverConnected) server.gripperOpen(); addLog('[관리자] 그리퍼 열기'); }}
+        onGripperClose={() => { if (serverConnected) server.gripperClose(); addLog('[관리자] 그리퍼 닫기'); }}
       />
     ),
     safety: (

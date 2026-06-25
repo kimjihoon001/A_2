@@ -555,6 +555,11 @@ def main(args=None):
     # 2. 메인 실행 블록 (Main Flow) 에서 함수 호출
     # ==========================================
 
+
+    pencil_grip()
+    pencil_release()
+
+
     node.get_logger().info("로봇 테스크 시작")
     frame_lower_setup()
     slide_and_pinch_paper()

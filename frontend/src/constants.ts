@@ -52,6 +52,7 @@ export const FRAME_SIZES = [
   { key: 'SQ128',  label: '128×128mm (64px·2mm)', w: 128, h: 128 },
   { key: 'SQ256',  label: '256×256mm (64px·4mm)', w: 256, h: 256 },
   { key: 'A5',     label: 'A5  (148×210mm)',       w: 148, h: 210 },
+  { key: 'A5_IN',  label: 'A5 액자 내부 (130×185mm)', w: 130, h: 185 },
   { key: 'A4',     label: 'A4  (210×297mm)',       w: 210, h: 297 },
   { key: 'A3',     label: 'A3  (297×420mm)',       w: 297, h: 420 },
   { key: 'B5',     label: 'B5  (182×257mm)',       w: 182, h: 257 },
@@ -69,9 +70,9 @@ export const RESOLUTIONS = [
 ];
 
 export const DEFAULT_ART_SETTINGS: ArtSettings = {
-  frameSizeKey: 'A5',
-  frameWidth:   148,
-  frameHeight:  210,
+  frameSizeKey: 'A5_IN',
+  frameWidth:   130,
+  frameHeight:  185,
   paperType:    '일반 용지',
   resolutionKey:'A5_M',
   resWidth:      74,

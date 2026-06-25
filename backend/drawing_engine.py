@@ -54,11 +54,13 @@ def _build_contour_segments(pixels: list[dict], calibration: dict,
         mm_x = float(calibration["pixel_spacing_mm"])
         mm_y = mm_x
 
-    cx_img = width  / 2.0
-    cy_img = height / 2.0
+    # 어두운 픽셀 bounding box 우하단 → 사용자 origin에 정렬
+    dark_pts = [(p["x"], p["y"]) for p in pixels if p["gray"] <= 200]
+    max_x_dark = max(d[0] for d in dark_pts) if dark_pts else width - 1
+    max_y_dark = max(d[1] for d in dark_pts) if dark_pts else height - 1
 
     def to_robot(px: float, py: float) -> tuple[float, float]:
-        return ox - (py - cy_img) * mm_y, oy - (px - cx_img) * mm_x
+        return ox + (max_y_dark - py) * mm_y, oy + (max_x_dark - px) * mm_x
 
     # Marching Squares: TL=8, TR=4, BR=2, BL=1 (1 = gray < level = dark)
     MS_TABLE = {
@@ -176,12 +178,12 @@ def _build_path(pixels: list[dict], calibration: dict,
         mm_per_px_x = float(calibration["pixel_spacing_mm"])
         mm_per_px_y = mm_per_px_x
 
-    # 어두운 픽셀 bounding box 좌상단 → 사용자 origin에 정렬
+    # 어두운 픽셀 bounding box 우하단 → 사용자 origin에 정렬
     dark = [(p["x"], p["y"]) for p in pixels if _gray_to_force(p["gray"]) is not None]
     if not dark:
         return []
-    min_y = min(d[1] for d in dark)
-    min_x = min(d[0] for d in dark if d[1] == min_y)
+    max_y = max(d[1] for d in dark)
+    max_x = max(d[0] for d in dark)
 
     path = []
     for y in range(height):
@@ -190,9 +192,9 @@ def _build_path(pixels: list[dict], calibration: dict,
             gray = grid.get((x, y), 255)
             if _gray_to_force(gray) is None:
                 continue
-            # 좌상단 기준 절대좌표: top→down = X-, left→right = Y-
-            rx = ox - (y - min_y) * mm_per_px_y
-            ry = oy - (x - min_x) * mm_per_px_x
+            # 우하단 기준 절대좌표: bottom→up = X+, right→left = Y+
+            rx = ox + (max_y - y) * mm_per_px_y
+            ry = oy + (max_x - x) * mm_per_px_x
             path.append({
                 "rx"  : rx,
                 "ry"  : ry,
@@ -306,6 +308,34 @@ class DrawingEngine:
         self._emit_log(f"그리기 시작: {len(pixels):,}px 입력 → {self.total_pixels:,}px 경로")
         if dry_run:
             self._emit_log("건식 실행 모드 — 실제 이동 없음", "WARNING")
+        else:
+            self._emit_log("연필 파지 중...")
+            self.robot.pencil_grip()
+            self._emit_log("연필 파지 완료")
+
+            if path:
+                first = path[0]
+                self._emit_log("첫 픽셀 위치로 이동 후 Z 자동 측정...")
+                self.robot.move_to_xy(first["rx"], first["ry"], first["z_up"])
+                z_result = None
+                for attempt in range(3):
+                    try:
+                        z_result = self.robot.auto_calibrate_z()
+                        break
+                    except Exception as e:
+                        self._emit_log(f"Z 측정 실패 ({attempt+1}/3): {e} — Y방향 힘 적용 후 재시도", "WARNING")
+                        self.robot.nudge_y()
+                if z_result is None:
+                    self._emit_log("Z 측정 3회 실패 — 그리기 취소", "ERROR")
+                    self._finish("failed", 0)
+                    return
+                new_z_up = z_result["pen_up_z"]
+                new_z_dn = z_result["pen_down_z"]
+                self.db.update_calibration_z(new_z_up, new_z_dn)
+                for step in path:
+                    step["z_up"] = new_z_up
+                    step["z_dn"] = new_z_dn
+                self._emit_log(f"Z 측정 완료: pen_up={new_z_up}mm, pen_down={new_z_dn}mm")
 
         try:
             for i, step in enumerate(path):
@@ -358,6 +388,10 @@ class DrawingEngine:
         self._emit_log(f"등고선 시작: {len(segments):,}개 선분")
         if dry_run:
             self._emit_log("건식 실행 모드 — 실제 이동 없음", "WARNING")
+        else:
+            self._emit_log("연필 파지 중...")
+            self.robot.pencil_grip()
+            self._emit_log("연필 파지 완료")
 
         try:
             for i, seg in enumerate(segments):
@@ -402,6 +436,22 @@ class DrawingEngine:
         }.get(final_status, "완료")
 
         self.db.finish_job(self.job_id, final_status, completed, duration)
+        try:
+            self._emit_log("연필 반납 중...")
+            self.robot.pencil_release()
+            self._emit_log("연필 반납 완료")
+        except Exception as e:
+            self._emit_log(f"연필 반납 실패 (무시): {e}", "WARNING")
+
+        if final_status == "success":
+            try:
+                self._emit_log("액자 조립 시작...")
+                self.robot.set_status("running")
+                self.robot.frame_assembly()
+                self._emit_log("액자 조립 완료")
+            except Exception as e:
+                self._emit_log(f"액자 조립 오류: {e}", "ERROR")
+
         self.robot.set_status("idle")
         self._emit_log(f"작업 {final_status}: {completed:,}픽셀 / {duration:.1f}s")
         self._emit_progress()
