@@ -378,7 +378,7 @@ async def handle_command(ws: WebSocket, msg: dict):
         await ws.send_text(json.dumps({"type": "log", "level": level, "message": msg_text}))
 
     elif cmd == "calibrate_z":
-        result = await asyncio.to_thread(_bridge.call_service, 'calibrate_z', 10.0)
+        result = await asyncio.to_thread(_bridge.call_service, 'calibrate_z', 30.0)
         if result['success']:
             try:
                 z_data = json.loads(result['message'])

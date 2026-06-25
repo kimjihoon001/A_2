@@ -110,12 +110,9 @@ export default function CalibrationPage({ robotState, addLog, onGoHome, onSaveCa
   }, [calibratedZ]);
 
   function setOriginFromTCP() {
-    setCalib(c => ({
-      ...c,
-      origin_x: robotState.tcpX,
-      origin_y: robotState.tcpY,
-      origin_z: robotState.tcpZ,
-    }));
+    const updated = { ...calib, origin_x: robotState.tcpX, origin_y: robotState.tcpY, origin_z: robotState.tcpZ };
+    setCalib(updated);
+    onSaveCalibration(updated);
     setOriginSaved(true);
     addLog(`종이 원점 저장: X=${robotState.tcpX.toFixed(1)}, Y=${robotState.tcpY.toFixed(1)}, Z=${robotState.tcpZ.toFixed(1)}`);
     setTimeout(() => setOriginSaved(false), 2000);

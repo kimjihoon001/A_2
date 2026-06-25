@@ -37,7 +37,7 @@ from std_srvs.srv import Trigger
 _BACKEND = os.path.join(os.path.dirname(__file__), '..', 'backend')
 sys.path.insert(0, _BACKEND)
 
-from config import STATUS_INTERVAL_SEC, DEFAULT_CALIBRATION
+from config import STATUS_INTERVAL_SEC
 from database import Database
 from robot_controller import RobotController
 from drawing_engine import DrawingEngine
@@ -179,10 +179,7 @@ class RobotArtNode(Node):
             res.message = '그리기 중에는 Z 측정 불가'
             return res
         try:
-            calib    = self.db.get_active_calibration() or DEFAULT_CALIBRATION
-            origin_x = float(calib.get('origin_x') or 356.0)
-            origin_y = float(calib.get('origin_y') or -41.0)
-            result   = self.robot.auto_calibrate_z(origin_x, origin_y)
+            result   = self.robot.auto_calibrate_z()
             self.db.update_calibration_z(result['pen_up_z'], result['pen_down_z'])
             res.success = True
             res.message = json.dumps(result)

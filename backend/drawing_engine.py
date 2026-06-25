@@ -19,10 +19,10 @@ def _gray_to_force(gray: int) -> float | None:
     pixel(S자): 점 찍기 — 6/5.5/5/4 N
     contour(선 그리기): 6/5.5/5/4 N
     """
-    if   gray <=  50: return 6.0
-    elif gray <= 100: return 5.5
-    elif gray <= 150: return 5.0
-    elif gray <= 200: return 4.0
+    if   gray <=  50: return 5.0
+    elif gray <= 100: return 4.5
+    elif gray <= 150: return 4.0
+    elif gray <= 200: return 3.0
     else:             return None
 
 
@@ -176,6 +176,13 @@ def _build_path(pixels: list[dict], calibration: dict,
         mm_per_px_x = float(calibration["pixel_spacing_mm"])
         mm_per_px_y = mm_per_px_x
 
+    # 어두운 픽셀 bounding box 좌상단 → 사용자 origin에 정렬
+    dark = [(p["x"], p["y"]) for p in pixels if _gray_to_force(p["gray"]) is not None]
+    if not dark:
+        return []
+    min_y = min(d[1] for d in dark)
+    min_x = min(d[0] for d in dark if d[1] == min_y)
+
     path = []
     for y in range(height):
         x_range = range(width) if y % 2 == 0 else range(width - 1, -1, -1)
@@ -184,8 +191,8 @@ def _build_path(pixels: list[dict], calibration: dict,
             if _gray_to_force(gray) is None:
                 continue
             # 좌상단 기준 절대좌표: top→down = X-, left→right = Y-
-            rx = ox - y * mm_per_px_y
-            ry = oy - x * mm_per_px_x
+            rx = ox - (y - min_y) * mm_per_px_y
+            ry = oy - (x - min_x) * mm_per_px_x
             path.append({
                 "rx"  : rx,
                 "ry"  : ry,

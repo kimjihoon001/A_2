@@ -112,14 +112,27 @@ def _init_dsr() -> bool:
         node = rclpy.create_node('robot_art_controller', namespace=ROBOT_ID)
         DR_init.__dsr__node = node
 
-        # DSR 노드 전용 executor — 별도 스레드에서 spin (서비스 응답 수신용)
+        # DSR 노드 전용 executor — 서비스 탐색·응답 수신용
         dsr_executor = rclpy.executors.SingleThreadedExecutor()
         dsr_executor.add_node(node)
         dsr_spin_thread = threading.Thread(target=dsr_executor.spin, daemon=True, name='dsr_executor')
         dsr_spin_thread.start()
 
+        # executor가 이미 g_node를 스핀하므로, DSR 함수 내부의
+        # rclpy.spin_until_future_complete가 동일 executor를 재진입하면
+        # "generator already executing" 충돌이 생긴다.
+        # → future 완료 이벤트로 대기하도록 패치 (executor가 콜백을 처리해 줌)
+        def _patched_spin_until_future_complete(node, future, executor=None, timeout_sec=None):
+            if future.done():
+                return
+            ev = threading.Event()
+            future.add_done_callback(lambda _: ev.set())
+            if not future.done():
+                ev.wait(timeout=timeout_sec if timeout_sec is not None else 10.0)
+        rclpy.spin_until_future_complete = _patched_spin_until_future_complete
+
         from DSR_ROBOT2 import (
-            set_robot_mode,
+            set_robot_mode, set_tool,
             movel, movej, amovel, move_home,
             get_current_posj, get_current_posx, get_robot_state,
             posx, posj,
@@ -127,6 +140,7 @@ def _init_dsr() -> bool:
             task_compliance_ctrl, set_desired_force,
             release_force, release_compliance_ctrl,
             check_force_condition, DR_AXIS_Z, DR_FC_MOD_REL,
+            get_tool_force,
         )
         from DRFC import ROBOT_MODE_AUTONOMOUS
 
@@ -135,6 +149,12 @@ def _init_dsr() -> bool:
             log.warning(f"set_robot_mode 실패 (ret={ret}) — 티칭펜던트가 수동 모드일 수 있음")
         else:
             log.info("AUTONOMOUS 모드 설정 완료")
+
+        try:
+            set_tool("Tool Weight1")
+            log.info("툴 설정 완료: Tool Weight1")
+        except Exception as e:
+            log.warning(f"set_tool 실패 (무시): {e}")
 
         _dsr_funcs = {
             'movel':                    movel,
@@ -157,6 +177,7 @@ def _init_dsr() -> bool:
             'check_force_condition':    check_force_condition,
             'DR_AXIS_Z':                DR_AXIS_Z,
             'DR_FC_MOD_REL':            DR_FC_MOD_REL,
+            'get_tool_force':           get_tool_force,
         }
 
         # MoveStop 서비스 클라이언트 (E-STOP용)
@@ -407,9 +428,12 @@ class RobotController:
 
     # ── 이동 ────────────────────────────────────────────────────
     def home(self):
-        log.info("원점 복귀 중...")
         with self._lock:
+            if self.state.status == "homing":
+                log.warning("원점 복귀 이미 진행 중")
+                return
             self.state.status = "homing"
+        log.info("원점 복귀 중...")
 
         if _dsr_available:
             try:
@@ -597,11 +621,11 @@ class RobotController:
             DR_MV_MOD_REL = _dsr_funcs['DR_MV_MOD_REL']
             DR_FC_MOD_REL = _dsr_funcs['DR_FC_MOD_REL']
 
-            # 픽셀 좌상단을 hover 목표로 설정 (접촉 후 긁힘 방지)
-            hover_pos = posx(x - pixel_size, y + pixel_size, z_up, 0, 180, 0)
+            # 픽셀 위치 그대로 hover (원점 = 픽셀 좌상단)
+            hover_pos = posx(x, y, z_up, 0, 180, 0)
 
             try:
-                # 상공 → 좌상단으로 이동
+                # 상공 → 픽셀 위치로 이동
                 ret = movel(hover_pos, vel=self._move_speed, acc=self._move_speed * 2)
                 log.info(f"movel hover ret={ret}")
 
@@ -637,13 +661,13 @@ class RobotController:
                 with self._lock:
                     self.state.pen_force = force
 
-                # ㄹ자 패턴
+                # ㄹ자 패턴: 원점(좌상단)에서 -X(아래), -Y(오른쪽) 방향으로 채움
                 lines     = int(pixel_size / pitch)
                 direction = 1
                 for i in range(lines + 1):
                     if self.state.estop:
                         return
-                    amovel(posx(direction * pixel_size, 0, 0, 0, 0, 0),
+                    amovel(posx(-direction * pixel_size, 0, 0, 0, 0, 0),
                            vel=10, acc=20, ref=DR_BASE, mod=DR_MV_MOD_REL)
                     time.sleep(0.05)
                     if i < lines:
@@ -733,47 +757,58 @@ class RobotController:
                 self.state.pen_force = 0.0
 
     # ── 자동 Z 캘리브레이션 ──────────────────────────────────────
-    def auto_calibrate_z(self, origin_x: float, origin_y: float) -> dict:
+    def auto_calibrate_z(self) -> dict:
         """
-        종이 원점 XY에서 Z를 천천히 내려 접촉점 자동 측정.
+        현재 TCP X, Y 위치에서 Z를 천천히 내려 접촉점 자동 측정.
+        로봇팔을 종이 위 적당한 위치에 올려둔 상태에서 호출.
         반환: {'contact_z': float, 'pen_up_z': float, 'pen_down_z': float}
         """
-        Z_START         = 280.0   # 탐색 시작 높이 (mm)
-        FORCE_THRESHOLD = 0.8     # 접촉 감지 임계 힘 (N)
+        FORCE_THRESHOLD = 2.0    # 접촉 감지 임계 힘 (N, DR_FC_MOD_REL 기준 추가 힘)
 
         if self.state.estop:
             raise RuntimeError("E-STOP 상태에서 Z 측정 불가")
         if not _dsr_available:
             raise RuntimeError("실제 로봇 연결 필요 (시뮬 모드에서는 불가)")
 
-        posx   = _dsr_funcs['posx']
-        movel  = _dsr_funcs['movel']
+        posx    = _dsr_funcs['posx']
+        movel   = _dsr_funcs['movel']
         DR_BASE = _dsr_funcs['DR_BASE']
 
-        log.info(f"자동 Z 측정 시작: ({origin_x:.1f}, {origin_y:.1f}), 시작 Z={Z_START}")
+        # 현재 TCP 위치와 자세를 그대로 읽어 Z만 올림
+        tcp_pos, _ = _dsr_funcs['get_current_posx']()
+        if not tcp_pos:
+            raise RuntimeError("현재 TCP 위치 읽기 실패")
+        cur_x,  cur_y,  cur_z  = float(tcp_pos[0]), float(tcp_pos[1]), float(tcp_pos[2])
+        cur_rx, cur_ry, cur_rz = float(tcp_pos[3]), float(tcp_pos[4]), float(tcp_pos[5])
 
-        start_pos = posx(origin_x, origin_y, Z_START, 0.0, 180.0, 0.0)
-        movel(start_pos, vel=[self._move_speed, self._move_speed], acc=[self._move_speed * 2, self._move_speed * 2], ref=DR_BASE)
+        log.info(f"자동 Z 측정 시작: ({cur_x:.1f}, {cur_y:.1f}), 현재 Z={cur_z:.1f}")
 
-        _dsr_funcs['task_compliance_ctrl']([3000, 3000, 500, 3100, 3100, 100])
+        start_pos = posx(cur_x, cur_y, cur_z, cur_rx, cur_ry, cur_rz)
+
+        _dsr_funcs['task_compliance_ctrl']([3000, 3000, 30, 100, 100, 100])
         time.sleep(0.05)
         _dsr_funcs['set_desired_force'](
-            [0, 0, -1.0, 0, 0, 0],
+            [0, 0, -10.0, 0, 0, 0],
             dir=[0, 0, 1, 0, 0, 0],
             mod=_dsr_funcs['DR_FC_MOD_REL'],
         )
 
+        # Tool Weight1 보상 후 힘 직접 읽기 — 접촉 시 Z 힘 증가 감지
         contact_z = None
-        deadline  = time.time() + 6.0
+        deadline  = time.time() + 15.0
         while time.time() < deadline:
-            with self._lock:
-                fz = abs(self.state.tool_force[2]) if len(self.state.tool_force) > 2 else 0
+            try:
+                f = _dsr_funcs['get_tool_force']()
+                fz = abs(f[2]) if f and len(f) > 2 else 0.0
+            except Exception:
+                fz = 0.0
             if fz >= FORCE_THRESHOLD:
                 tcp_pos, _ = _dsr_funcs['get_current_posx']()
                 if tcp_pos:
                     contact_z = float(tcp_pos[2])
+                    log.info(f"접촉 감지: fz={fz:.2f}N, Z={contact_z:.2f}mm")
                 break
-            time.sleep(0.05)
+            time.sleep(0.02)
 
         _dsr_funcs['release_force']()
         time.sleep(0.03)
