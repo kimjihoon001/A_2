@@ -53,7 +53,7 @@ class BridgeNode(Node):
         # 서비스 클라이언트 (robot_art_node 경유)
         self._svc = {
             name: self.create_client(Trigger, f'/robot_art/{name}')
-            for name in ('start', 'stop', 'pause', 'resume', 'home',
+            for name in ('start', 'stop', 'pause', 'resume', 'home', 'estop',
                          'gripper_open', 'gripper_close', 'pencil_grip', 'pencil_release', 'calibrate_z',
                          'frame_task', 'frame_lower', 'frame_paper_pickup', 'frame_align', 'frame_upper', 'frame_eject',
                          'paper_check', 'confirm_retry', 'release_estop')
@@ -369,11 +369,13 @@ async def handle_command(ws: WebSocket, msg: dict):
         await broadcast({"type": "log", "level": "WARNING", "message": "강제정지 — 서보 OFF"})
 
     elif cmd == "estop":
+        await asyncio.to_thread(_bridge.call_service, 'estop')
         result = await asyncio.to_thread(_bridge.call_estop)
         db.add_log("E-STOP 활성화", "ERROR")
         await broadcast({"type": "log", "level": "ERROR", "message": result['message']})
 
     elif cmd == "reset_estop":
+        await asyncio.to_thread(_bridge.call_service, 'release_estop')
         result = await asyncio.to_thread(_bridge.call_release_estop)
         db.add_log("E-STOP 해제", "INFO")
         await broadcast({"type": "log", "level": "INFO", "message": result.get('message', 'E-STOP 해제')})

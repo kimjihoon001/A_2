@@ -61,6 +61,22 @@ def _gripper_move(force_n: float, width_mm: float):
     except Exception as e:
         log.error(f"그리퍼 이동 명령 실패: {e}")
 
+def _gripper_stop():
+    """그리퍼 강제 정지 명령 (Control Word 0 전송)"""
+    try:
+        values = [0, 0, 0]  # Control=0 (동작 취소/정지)
+        n      = len(values)
+        data   = struct.pack(f'>{n}H', *values)
+        length = 1 + 1 + 2 + 2 + 1 + len(data)
+        req    = struct.pack('>HHHBBHHB', 1, 0, length, _GRIPPER_UNIT, 0x10, 0, n, len(data)) + data
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            s.connect((_GRIPPER_IP, _GRIPPER_PORT))
+            s.sendall(req)
+            s.recv(256)
+    except Exception as e:
+        log.error(f"그리퍼 강제 정지 명령 실패: {e}")
+
 log = logging.getLogger(__name__)
 
 ROBOT_ID    = "dsr01"
@@ -206,7 +222,7 @@ def _init_dsr() -> bool:
         return False
 
 
-_ESTOP_STATES = {5, 6}  # STATE_SAFE_STOP, STATE_EMERGENCY_STOP
+_ESTOP_STATES = {3, 5, 6, 10}  # 3:SAFE_OFF, 5:SAFE_STOP, 6:EMERGENCY_STOP, 10:SAFE_OFF2
 
 
 def _poll_robot_state():
@@ -232,10 +248,6 @@ def _on_robot_state(future):
                 log.warning(f"외부 E-STOP 감지 (robot_state={state})")
                 _controller.state.estop  = True
                 _controller.state.status = "estop"
-            elif state not in _ESTOP_STATES and _controller.state.estop:
-                log.info(f"E-STOP 해제 감지 (robot_state={state})")
-                _controller.state.estop  = False
-                _controller.state.status = "idle"
     except Exception as e:
         log.warning(f"robot state 콜백 오류: {e}")
 
@@ -280,6 +292,8 @@ class RobotController:
         """즉시 정지: 모션 중단 플래그 설정 + DSR move_stop 호출 (E-STOP 아님, 서보 유지)."""
         self._abort = True
         self._motion_pause_evt.set()  # 일시정지 대기 중이면 풀어줘야 abort 감지됨
+        import threading
+        threading.Thread(target=_gripper_stop, daemon=True).start()
         if _dsr_available:
             try:
                 client = _dsr_funcs['stop_client']
@@ -292,6 +306,8 @@ class RobotController:
 
     def pause_motion(self):
         self._motion_pause_evt.clear()
+        import threading
+        threading.Thread(target=_gripper_stop, daemon=True).start()
 
     def resume_motion(self):
         self._motion_pause_evt.set()
@@ -951,17 +967,53 @@ class RobotController:
 
     # ── 그리퍼 (RG2, Modbus TCP) ────────────────────────────────
     def gripper_open(self, force: float = GRIPPER_DEFAULT_FORCE):
+        if self._check_abort():
+            log.warning("중단 상태 — 그리퍼 열기 취소")
+            return
+        self._wait_if_paused()
+        
         log.info(f"그리퍼 열기 (force={force}N)")
         _gripper_move(force, GRIPPER_OPEN_WIDTH)
-        time.sleep(1.5)  # 동작 완료 대기
+        
+        deadline = time.time() + 1.5
+        while time.time() < deadline:
+            if self._check_abort():
+                return
+            if not self._motion_pause_evt.is_set():
+                self._wait_if_paused()
+                if self._check_abort():
+                    return
+                log.info("일시정지 해제 — 그리퍼 열기 재개")
+                _gripper_move(force, GRIPPER_OPEN_WIDTH)
+                deadline = time.time() + 1.5
+            time.sleep(0.05)
+            
         w = _gripper_read_width()
         with self._lock:
             self.state.gripper_width = w if w is not None else GRIPPER_OPEN_WIDTH
 
     def gripper_close(self, force: float = GRIPPER_DEFAULT_FORCE):
+        if self._check_abort():
+            log.warning("중단 상태 — 그리퍼 닫기 취소")
+            return
+        self._wait_if_paused()
+        
         log.info(f"그리퍼 닫기 (force={force}N)")
         _gripper_move(force, GRIPPER_CLOSE_WIDTH)
-        time.sleep(1.5)
+        
+        deadline = time.time() + 1.5
+        while time.time() < deadline:
+            if self._check_abort():
+                return
+            if not self._motion_pause_evt.is_set():
+                self._wait_if_paused()
+                if self._check_abort():
+                    return
+                log.info("일시정지 해제 — 그리퍼 닫기 재개")
+                _gripper_move(force, GRIPPER_CLOSE_WIDTH)
+                deadline = time.time() + 1.5
+            time.sleep(0.05)
+            
         w = _gripper_read_width()
         with self._lock:
             self.state.gripper_width = w if w is not None else GRIPPER_CLOSE_WIDTH
