@@ -198,20 +198,32 @@ def _init_dsr() -> bool:
         }
 
         # MoveStop 서비스 클라이언트 (E-STOP용)
-        from dsr_msgs2.srv import MoveStop, SetRobotControl, GetRobotState
+        from dsr_msgs2.srv import MoveStop, SetRobotControl, GetRobotState, SetSafeStopResetType
         _stop_client     = node.create_client(MoveStop,         f'/{ROBOT_ID}/motion/move_stop')
         _servo_on_client = node.create_client(SetRobotControl,  f'/{ROBOT_ID}/system/set_robot_control')
         _state_client    = node.create_client(GetRobotState,    f'/{ROBOT_ID}/system/get_robot_state')
+        _safe_stop_client= node.create_client(SetSafeStopResetType, f'/{ROBOT_ID}/system/set_safe_stop_reset_type')
+        
         _dsr_funcs['stop_client']      = _stop_client
         _dsr_funcs['servo_on_client']  = _servo_on_client
         _dsr_funcs['state_client']     = _state_client
+        _dsr_funcs['safe_stop_client'] = _safe_stop_client
         _dsr_funcs['MoveStop']         = MoveStop
         _dsr_funcs['SetRobotControl']  = SetRobotControl
         _dsr_funcs['GetRobotState']    = GetRobotState
+        _dsr_funcs['SetSafeStopResetType'] = SetSafeStopResetType
         _dsr_funcs['dsr_executor']     = dsr_executor
 
         _dsr_available = True
         log.info("DSR_ROBOT2 초기화 성공 — 실제 M0609 제어 모드")
+
+        # 안전 정지 프로그램 모드 초기화 (리셋 시 자동 재개 방지)
+        try:
+            req = SetSafeStopResetType.Request()
+            req.reset_type = 0  # SAFE_STOP_RESET_TYPE_PROGRAM_STOP
+            _safe_stop_client.call_async(req)
+        except Exception as e:
+            log.warning(f"안전 정지 리셋 타입 설정 실패 (무시): {e}")
 
         # 로봇 상태 폴링 타이머 (0.5초마다 estop 감지)
         node.create_timer(0.5, _poll_robot_state)
@@ -456,7 +468,7 @@ class RobotController:
                 client = _dsr_funcs['stop_client']
                 MoveStop = _dsr_funcs['MoveStop']
                 req = MoveStop.Request()
-                req.stop_mode = 1  # DR_QSTOP: 소프트웨어 즉시 정지 (STO 없이 복구 가능)
+                req.stop_mode = 0  # DR_QSTOP_STO: 하드웨어 토크 차단 포함 즉시 정지
                 done = _threading.Event()
                 future = client.call_async(req)
                 future.add_done_callback(lambda _: done.set())

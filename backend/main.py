@@ -167,7 +167,7 @@ class BridgeNode(Node):
         done = threading.Event()
         result_box: list = [None]
         req = ServoOff.Request()
-        req.stop_type = ServoOff.Request.STOP_TYPE_QUICK
+        req.stop_type = 0  # STOP_TYPE_QUICK_STO (즉시 토크 차단)
         future = self._servo_off_client.call_async(req)
         future.add_done_callback(lambda f: (result_box.__setitem__(0, f.result()), done.set()))
         if not done.wait(timeout=timeout):
@@ -362,17 +362,22 @@ async def handle_command(ws: WebSocket, msg: dict):
         await broadcast({"type": "log", "level": "INFO", "message": result['message']})
 
     elif cmd == "stop":
-        # 강제정지 = E-STOP: engine 중단 후 서보 OFF
-        await asyncio.to_thread(_bridge.call_service, 'stop')
-        await asyncio.to_thread(_bridge.call_estop)
+        # 강제정지 = E-STOP: engine 중단 후 서보 OFF (병렬 처리로 지연 시간 최소화)
+        await asyncio.gather(
+            asyncio.to_thread(_bridge.call_service, 'stop'),
+            asyncio.to_thread(_bridge.call_estop)
+        )
         db.add_log("강제정지 (서보 OFF)", "WARNING")
         await broadcast({"type": "log", "level": "WARNING", "message": "강제정지 — 서보 OFF"})
 
     elif cmd == "estop":
-        await asyncio.to_thread(_bridge.call_service, 'estop')
-        result = await asyncio.to_thread(_bridge.call_estop)
+        # 소프트웨어 모션 정지와 하드웨어 차단을 동시에 호출
+        await asyncio.gather(
+            asyncio.to_thread(_bridge.call_service, 'estop'),
+            asyncio.to_thread(_bridge.call_estop)
+        )
         db.add_log("E-STOP 활성화", "ERROR")
-        await broadcast({"type": "log", "level": "ERROR", "message": result['message']})
+        await broadcast({"type": "log", "level": "ERROR", "message": "E-STOP 활성화"})
 
     elif cmd == "reset_estop":
         await asyncio.to_thread(_bridge.call_service, 'release_estop')
