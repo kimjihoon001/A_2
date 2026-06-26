@@ -122,8 +122,9 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
 
       // 픽셀 모드용 — 저해상도
       const { pixels } = processAtRes(resWidth, resHeight);
-      setPixelData(pixels);
-      pixelDataRef.current = pixels;
+      const drawPixels = pixels.filter(p => p.gray <= 200);
+      setPixelData(drawPixels);
+      pixelDataRef.current = drawPixels;
 
       // 미리보기 캔버스 렌더링
       const disp = processedCanvasRef.current;
@@ -335,7 +336,8 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
     ? drawingState.currentPixel / elapsedSec : 0;
   const remainSec = pxPerSec > 0
     ? (drawingState.totalPixels - drawingState.currentPixel) / pxPerSec : null;
-  const estMin = Math.round(pixelData.length * 0.5 / 60);
+  const estSecPerPixel = artSettings.dryRun ? 0.05 : 3.0;
+  const estMin = Math.round(pixelData.length * estSecPerPixel / 60);
 
   return (
     // Fragment: 메인 div와 fixed 패널을 형제로 — overflow:hidden 바깥에 패널 배치

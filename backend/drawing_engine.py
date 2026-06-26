@@ -234,6 +234,11 @@ class DrawingEngine:
                     return
 
                 self.current_step = "연필파지"
+                self._emit_log("연필 파지 전 홈 복귀 중...")
+                self.robot.home()
+                if self.robot._check_abort():
+                    self._finish("cancelled", 0)
+                    return
                 self._emit_log("연필 파지 중...")
                 self.robot.pencil_grip()
                 self._emit_log("연필 파지 완료")

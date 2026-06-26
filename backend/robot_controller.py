@@ -257,6 +257,8 @@ def _on_robot_state(future):
         state = result.robot_state
         with _controller._lock:
             if state in _ESTOP_STATES and not _controller.state.estop:
+                if _controller._releasing_estop:
+                    return  # 해제 진행 중 — 폴러가 덮어쓰지 않음
                 log.warning(f"외부 E-STOP 감지 (robot_state={state})")
                 _controller.state.estop  = True
                 _controller.state.status = "estop"
@@ -297,6 +299,7 @@ class RobotController:
         self.on_confirm_request = None  # (message: str) -> None
         self.on_step_change = None      # (step: str) -> None
         self._abort = False
+        self._releasing_estop = False  # 해제 진행 중 폴러 재진입 방지
         self._motion_pause_evt = threading.Event()
         self._motion_pause_evt.set()  # set=실행, clear=일시정지
 
@@ -486,39 +489,63 @@ class RobotController:
 
     def release_estop(self):
         log.info("E-STOP 해제")
-        if _dsr_available:
-            import threading as _threading
-            client = _dsr_funcs['servo_on_client']
-            SetRobotControl = _dsr_funcs['SetRobotControl']
+        self._releasing_estop = True  # 폴러가 estop=True로 덮어쓰지 못하도록 차단
+        try:
+            if _dsr_available:
+                import threading as _threading
+                client = _dsr_funcs['servo_on_client']
+                SetRobotControl = _dsr_funcs['SetRobotControl']
 
-            def _send(control_val: int, label: str) -> bool:
-                try:
-                    req = SetRobotControl.Request()
-                    req.robot_control = control_val
-                    done = _threading.Event()
-                    future = client.call_async(req)
-                    future.add_done_callback(lambda _: done.set())
-                    if not done.wait(timeout=2.0):
-                        log.warning(f"E-STOP 해제 [{label}] 응답 타임아웃")
+                def _send(control_val: int, label: str) -> bool:
+                    try:
+                        req = SetRobotControl.Request()
+                        req.robot_control = control_val
+                        done = _threading.Event()
+                        future = client.call_async(req)
+                        future.add_done_callback(lambda _: done.set())
+                        if not done.wait(timeout=2.0):
+                            log.warning(f"E-STOP 해제 [{label}] 응답 타임아웃")
+                            return False
+                        log.info(f"E-STOP 해제 [{label}] 완료")
+                        return True
+                    except Exception as e:
+                        log.error(f"E-STOP 해제 [{label}] 실패: {e}")
                         return False
-                    log.info(f"E-STOP 해제 [{label}] 완료")
-                    return True
-                except Exception as e:
-                    log.error(f"E-STOP 해제 [{label}] 실패: {e}")
-                    return False
 
-            # 1단계: 안전 상태 리셋 (하드웨어 safety stop 상태일 경우 필요)
-            _send(3, "RESET_SAFE_STOP")
-            time.sleep(0.3)
-            # 2단계: 서보 온 — 최대 3회 재시도
-            for attempt in range(1, 4):
-                if _send(1, f"SERVO_ON #{attempt}"):
-                    break
-                time.sleep(0.5)
+                # 1단계: 안전 상태 리셋 (하드웨어 safety stop 상태일 경우 필요)
+                _send(3, "RESET_SAFE_STOP")
+                time.sleep(0.3)
+                # 2단계: 서보 온 — 최대 3회 재시도
+                for attempt in range(1, 4):
+                    if _send(1, f"SERVO_ON #{attempt}"):
+                        break
+                    time.sleep(0.5)
+                # 3단계: 하드웨어가 실제로 E-STOP 상태를 벗어날 때까지 직접 폴링 (최대 5초)
+                state_client  = _dsr_funcs.get('state_client')
+                GetRobotState = _dsr_funcs.get('GetRobotState')
+                if state_client and GetRobotState:
+                    deadline = time.time() + 5.0
+                    while time.time() < deadline:
+                        done_evt   = _threading.Event()
+                        result_box = [None]
+                        fut = state_client.call_async(GetRobotState.Request())
+                        fut.add_done_callback(lambda f: (result_box.__setitem__(0, f.result()), done_evt.set()))
+                        if done_evt.wait(timeout=1.0) and result_box[0] is not None:
+                            hw_state = result_box[0].robot_state
+                            if hw_state not in _ESTOP_STATES:
+                                log.info(f"하드웨어 E-STOP 해제 확인 (robot_state={hw_state})")
+                                break
+                        time.sleep(0.2)
+                    else:
+                        log.warning("하드웨어 E-STOP 해제 대기 타임아웃 (5초)")
+                else:
+                    time.sleep(1.0)
 
-        with self._lock:
-            self.state.estop  = False
-            self.state.status = "idle"
+            with self._lock:
+                self.state.estop  = False
+                self.state.status = "idle"
+        finally:
+            self._releasing_estop = False
         # 강제정지로 설정된 abort 플래그 해제 — 이후 개별 동작 가능하도록
         self._abort = False
         self._motion_pause_evt.set()
