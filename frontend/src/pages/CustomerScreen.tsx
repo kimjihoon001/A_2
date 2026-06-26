@@ -694,12 +694,6 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
             }}>
             {isRunning ? '그리는 중...' : '▶ 그리기 시작'}
           </button>
-          <button className="btn-danger"
-            style={{ flex: 1, padding: '13px', fontSize: 14 }}
-            disabled={!isRunning}
-            onClick={onCancelDrawing}>
-            정지
-          </button>
         </div>
       </div>
     </div>

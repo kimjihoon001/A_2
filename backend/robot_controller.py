@@ -72,7 +72,7 @@ def _read_dsr_robot_params() -> tuple[str, int]:
     """dsr_hardware2 config YAML 파일에서 robot host/port를 읽어 반환. 실패 시 config.py 값 사용."""
     try:
         import glob
-        pattern = f"/home/kimjihoon/ws_cobot_pjt/ws_edu/install/dsr_hardware2/share/dsr_hardware2/config/{ROBOT_ID}_parameters.yaml"
+        pattern = f"~/ws_cobot_pjt/ws_edu/install/dsr_hardware2/share/dsr_hardware2/config/{ROBOT_ID}_parameters.yaml"
         matches = glob.glob(pattern)
         if not matches:
             raise FileNotFoundError(f"파라미터 파일 없음: {pattern}")
@@ -271,14 +271,43 @@ class RobotController:
         self.robot_ip, self.robot_port = _read_dsr_robot_params()
         self._confirm_evt: threading.Event = threading.Event()
         self.on_confirm_request = None  # (message: str) -> None
+        self._abort = False
+        self._motion_pause_evt = threading.Event()
+        self._motion_pause_evt.set()  # set=실행, clear=일시정지
+
+    def abort(self):
+        """즉시 정지: 모션 중단 플래그 설정 + DSR move_stop 호출 (E-STOP 아님, 서보 유지)."""
+        self._abort = True
+        self._motion_pause_evt.set()  # 일시정지 대기 중이면 풀어줘야 abort 감지됨
+        if _dsr_available:
+            try:
+                client = _dsr_funcs['stop_client']
+                MoveStop = _dsr_funcs['MoveStop']
+                req = MoveStop.Request()
+                req.stop_mode = 1  # DR_QSTOP
+                client.call_async(req)
+            except Exception as e:
+                log.error(f"abort move_stop 실패: {e}")
+
+    def pause_motion(self):
+        self._motion_pause_evt.clear()
+
+    def resume_motion(self):
+        self._motion_pause_evt.set()
+
+    def _check_abort(self) -> bool:
+        return self._abort or self.state.estop
+
+    def _wait_if_paused(self):
+        self._motion_pause_evt.wait()
 
     def wait_for_confirm(self, message: str) -> bool:
-        """HMI에 팝업 요청 후 사용자가 확인할 때까지 대기. estop 시 False 반환."""
+        """HMI에 팝업 요청 후 사용자가 확인할 때까지 대기. estop/abort 시 False 반환."""
         if self.on_confirm_request:
             self.on_confirm_request(message)
         self._confirm_evt.clear()
         while not self._confirm_evt.wait(timeout=0.5):
-            if self.state.estop:
+            if self.state.estop or self._abort:
                 return False
         return True
 
@@ -424,21 +453,35 @@ class RobotController:
     def release_estop(self):
         log.info("E-STOP 해제")
         if _dsr_available:
-            try:
-                import threading as _threading
-                client = _dsr_funcs['servo_on_client']
-                SetRobotControl = _dsr_funcs['SetRobotControl']
-                req = SetRobotControl.Request()
-                req.robot_control = 3  # CONTROL_RESET_SAFET_OFF → STATE_STANDBY
-                done = _threading.Event()
-                future = client.call_async(req)
-                future.add_done_callback(lambda _: done.set())
-                if not done.wait(timeout=2.0):
-                    log.warning("E-STOP 해제: set_robot_control 응답 타임아웃")
-                else:
-                    log.info("E-STOP 해제: 서보 온 완료")
-            except Exception as e:
-                log.error(f"서보 온 실패: {e}")
+            import threading as _threading
+            client = _dsr_funcs['servo_on_client']
+            SetRobotControl = _dsr_funcs['SetRobotControl']
+
+            def _send(control_val: int, label: str) -> bool:
+                try:
+                    req = SetRobotControl.Request()
+                    req.robot_control = control_val
+                    done = _threading.Event()
+                    future = client.call_async(req)
+                    future.add_done_callback(lambda _: done.set())
+                    if not done.wait(timeout=2.0):
+                        log.warning(f"E-STOP 해제 [{label}] 응답 타임아웃")
+                        return False
+                    log.info(f"E-STOP 해제 [{label}] 완료")
+                    return True
+                except Exception as e:
+                    log.error(f"E-STOP 해제 [{label}] 실패: {e}")
+                    return False
+
+            # 1단계: 안전 상태 리셋 (하드웨어 safety stop 상태일 경우 필요)
+            _send(3, "RESET_SAFE_STOP")
+            time.sleep(0.3)
+            # 2단계: 서보 온 — 최대 3회 재시도
+            for attempt in range(1, 4):
+                if _send(1, f"SERVO_ON #{attempt}"):
+                    break
+                time.sleep(0.5)
+
         with self._lock:
             self.state.estop  = False
             self.state.status = "idle"
@@ -646,8 +689,10 @@ class RobotController:
                 ret = movel(hover_pos, vel=self._move_speed, acc=self._move_speed * 2)
                 log.info(f"movel hover ret={ret}")
 
-                if self.state.estop:
+                if self._check_abort():
                     return
+
+                self._wait_if_paused()
 
                 # 컴플라이언스 + 목표 힘 인가
                 time.sleep(0.03)
@@ -663,7 +708,7 @@ class RobotController:
                 t0 = time.time()
                 deadline = t0 + 1.5
                 while time.time() < deadline:
-                    if self.state.estop:
+                    if self._check_abort():
                         return
                     try:
                         f = _dsr_funcs['get_tool_force']()
@@ -689,7 +734,7 @@ class RobotController:
                 lines     = int(pixel_size / pitch)
                 direction = 1
                 for i in range(lines + 1):
-                    if self.state.estop:
+                    if self._check_abort():
                         return
                     amovel(posx(-direction * pixel_size, 0, 0, 0, 0, 0),
                            vel=10, acc=20, ref=DR_BASE, mod=DR_MV_MOD_REL)
@@ -704,13 +749,15 @@ class RobotController:
                 _dsr_funcs['mwait']()
 
             finally:
-                # 힘 해제 후 상공 복귀
+                # 힘 해제 (abort이어도 항상 실행)
                 _dsr_funcs['release_force']()
                 time.sleep(0.03)
                 _dsr_funcs['release_compliance_ctrl']()
                 with self._lock:
                     self.state.pen_force = 0.0
-                movel(hover_pos, vel=self._move_speed, acc=self._move_speed * 2)
+                # abort이면 move_stop이 이미 호출됐으므로 hover 복귀 스킵
+                if not self._abort:
+                    movel(hover_pos, vel=self._move_speed, acc=self._move_speed * 2)
 
         else:
             # 시뮬레이션
@@ -896,6 +943,67 @@ class RobotController:
         with self._lock:
             self.state.gripper_width = w if w is not None else GRIPPER_CLOSE_WIDTH
 
+    def check_paper(self) -> bool:
+        """그림판 위에 종이가 있는지 확인. 시뮬 모드는 항상 True."""
+        
+        if not _dsr_available:
+            return True
+
+        posx                = _dsr_funcs['posx']
+        movel               = _dsr_funcs['movel']
+        get_current_posx    = _dsr_funcs['get_current_posx']
+        task_compliance_ctrl    = _dsr_funcs['task_compliance_ctrl']
+        set_desired_force       = _dsr_funcs['set_desired_force']
+        release_force           = _dsr_funcs['release_force']
+        release_compliance_ctrl = _dsr_funcs['release_compliance_ctrl']
+        DR_FC_MOD_REL = _dsr_funcs['DR_FC_MOD_REL']
+        DR_BASE       = _dsr_funcs['DR_BASE']
+    
+
+        MIN_PAPER_Z = 330.1
+
+        pos_center = posx(563.03, 75.97, 328.62, 9.86, 180.00, 98.32)
+        hover_pos  = posx(pos_center[0], pos_center[1], pos_center[2] + 20,
+                          pos_center[3], pos_center[4], pos_center[5])
+        ready_pos  = posx(pos_center[0], pos_center[1], pos_center[2] + 2,
+                          pos_center[3], pos_center[4], pos_center[5])
+
+        movel(hover_pos, vel=[100, 100], acc=[50, 50], mod=0)
+        time.sleep(0.1)
+        self.gripper_close()
+        time.sleep(0.5)
+        movel(ready_pos, vel=30, acc=50, mod=0)
+
+        task_compliance_ctrl([500, 500, 500, 100, 100, 100])
+        time.sleep(0.5)
+        set_desired_force([0, 0, -2, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
+        contact_z = None
+        deadline  = time.time() + 15.0
+        while time.time() < deadline:
+            try:
+                f = _dsr_funcs['get_tool_force']()
+                fz = abs(f[2]) if f and len(f) > 2 else 0.0
+            except Exception:
+                fz = 0.0
+            if fz >= 2:
+                tcp_pos, _ = _dsr_funcs['get_current_posx']()
+                if tcp_pos:
+                    contact_z = float(tcp_pos[2])
+                    log.info(f"접촉 감지: fz={fz:.2f}N, Z={contact_z:.2f}mm")
+                break
+            time.sleep(0.02)
+
+        current_pos, _ = get_current_posx(ref=DR_BASE)
+        current_z = float(current_pos[2])
+        log.info(f"종이 확인 Z={current_z:.2f}mm (기준={MIN_PAPER_Z}mm)")
+
+        release_force()
+        time.sleep(0.1)
+        release_compliance_ctrl()
+        movel(hover_pos, vel=50, acc=50, mod=0)
+
+        return current_z >= MIN_PAPER_Z
+
     def pencil_grip(self):
         """연필통에서 연필 파지 (T4_robottask 좌표 그대로)"""
         if not _dsr_available:
@@ -910,17 +1018,20 @@ class RobotController:
         pos_home = posx(526.83,   54.46, 506.64,             62.97, 179.94, -117.13)
 
         while True:
-            if self.state.estop:
-                log.warning("E-STOP — pencil_grip 중단")
+            if self._check_abort():
+                log.warning("abort/E-STOP — pencil_grip 중단")
                 return
+            self._wait_if_paused()
             log.info("연필 파지 시작")
             self.gripper_open()
 
-            if self.state.estop: return
+            if self._check_abort(): return
+            self._wait_if_paused()
             movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
-            if self.state.estop: return
+            if self._check_abort(): return
+            self._wait_if_paused()
             movel(pos_down, vel=[100, 100], acc=[50, 50], mod=0)
-            if self.state.estop: return
+            if self._check_abort(): return
             self.gripper_close()
 
             current_width = _gripper_read_width()
@@ -933,12 +1044,12 @@ class RobotController:
                 continue
 
             log.info(f"연필 파지 완료 (폭={current_width}mm)")
-            if self.state.estop: return
+            if self._check_abort(): return
+            self._wait_if_paused()
             movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
-            if self.state.estop: return
+            if self._check_abort(): return
+            self._wait_if_paused()
             movel(pos_home, vel=[100, 100], acc=[50, 50], mod=0)
-            # pos_home_aligned = posx(526.83, 54.46, 506.64, 0, 180, 0)
-            # movel(pos_home_aligned, vel=[50, 30], acc=[50, 30])
             log.info("연필 홈 이동 완료")
             return
 
@@ -956,13 +1067,16 @@ class RobotController:
         pos_home = posx(526.83,   54.46, 506.64,             62.97, 179.94, -117.13)
 
         log.info("연필 반납 시작")
-        if self.state.estop:
-            log.warning("E-STOP — pencil_release 중단")
+        if self._check_abort():
+            log.warning("abort/E-STOP — pencil_release 중단")
             return
+        self._wait_if_paused()
         movel(pos_home, vel=[100, 100], acc=[50, 50], mod=0)
-        if self.state.estop: return
+        if self._check_abort(): return
+        self._wait_if_paused()
         movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
-        if self.state.estop: return
+        if self._check_abort(): return
+        self._wait_if_paused()
         movel(pos_down, vel=[100, 100], acc=[50, 50], mod=0)
         self.gripper_open()
         movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
@@ -988,9 +1102,10 @@ class RobotController:
         DR_BASE                 = _dsr_funcs['DR_BASE']
 
         def _chk():
-            if self.state.estop:
-                log.warning("E-STOP — frame_assembly 중단")
+            if self._check_abort():
+                log.warning("abort/E-STOP — frame_assembly 중단")
                 return False
+            self._wait_if_paused()
             return True
 
         # ── 1. 액자 하판 배치 ────────────────────────────────────

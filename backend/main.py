@@ -176,15 +176,31 @@ class BridgeNode(Node):
     def call_release_estop(self, timeout: float = 5.0) -> dict:
         if not self._servo_on_client.wait_for_service(timeout_sec=timeout):
             return {'success': False, 'message': 'set_robot_control 서비스 응답 없음'}
-        done = threading.Event()
-        result_box: list = [None]
-        req = SetRobotControl.Request()
-        req.robot_control = 3  # CONTROL_RESET_SAFET_OFF → STATE_STANDBY
-        future = self._servo_on_client.call_async(req)
-        future.add_done_callback(lambda f: (result_box.__setitem__(0, f.result()), done.set()))
-        if not done.wait(timeout=timeout):
-            return {'success': False, 'message': 'set_robot_control 응답 타임아웃'}
-        return {'success': result_box[0].success, 'message': 'E-STOP 해제'}
+
+        def _send(control_val: int) -> bool:
+            done = threading.Event()
+            result_box: list = [None]
+            req = SetRobotControl.Request()
+            req.robot_control = control_val
+            future = self._servo_on_client.call_async(req)
+            future.add_done_callback(lambda f: (result_box.__setitem__(0, f.result()), done.set()))
+            if not done.wait(timeout=timeout):
+                return False
+            r = result_box[0]
+            return r is not None and r.success
+
+        # 1단계: 안전 상태 리셋
+        _send(3)
+        time.sleep(0.3)
+        # 2단계: 서보 ON — 최대 3회 재시도
+        for attempt in range(1, 4):
+            if _send(1):
+                log.info(f"서보 ON 성공 (시도 {attempt}회)")
+                return {'success': True, 'message': 'E-STOP 해제 완료'}
+            log.warning(f"서보 ON 실패 (시도 {attempt}/3)")
+            time.sleep(0.5)
+
+        return {'success': False, 'message': '서보 ON 3회 모두 실패'}
 
     # ── 구독 콜백 ──────────────────────────────────────────────
     def _on_status(self, msg: String):

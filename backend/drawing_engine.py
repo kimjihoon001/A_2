@@ -51,12 +51,11 @@ def _build_path(pixels: list[dict], calibration: dict,
     force_min = float(settings.get("penForceMin", 3.0)) if settings else 3.0
     force_max = float(settings.get("penForceMax", 5.0)) if settings else 5.0
 
-    # 어두운 픽셀 bounding box 우하단 → 사용자 origin에 정렬
-    dark = [(p["x"], p["y"]) for p in pixels if _gray_to_force(p["gray"], force_min, force_max) is not None]
-    if not dark:
+    # 픽셀 그리드 전체 우하단(width-1, height-1)을 원점(ox, oy)에 고정 정렬
+    # max_x/max_y(어두운 픽셀 bounding box)를 쓰면 좌상단이 흰색일 때 원점이 달라짐
+    has_dark = any(_gray_to_force(p["gray"], force_min, force_max) is not None for p in pixels)
+    if not has_dark:
         return []
-    max_y = max(d[1] for d in dark)
-    max_x = max(d[0] for d in dark)
 
     path = []
     for y in range(height):
@@ -65,8 +64,8 @@ def _build_path(pixels: list[dict], calibration: dict,
             gray = grid.get((x, y), 255)
             if _gray_to_force(gray, force_min, force_max) is None:
                 continue
-            rx = ox + (max_y - y) * mm_per_px_y
-            ry = oy + (max_x - x) * mm_per_px_x
+            rx = ox + (height - 1 - y) * mm_per_px_y
+            ry = oy + (width  - 1 - x) * mm_per_px_x
             path.append({
                 "rx"  : rx,
                 "ry"  : ry,
@@ -134,6 +133,8 @@ class DrawingEngine:
             raise RuntimeError("이미 그리기 작업이 진행 중입니다.")
 
         self._stop_evt.clear()
+        self.robot._abort = False
+        self.robot._motion_pause_evt.set()
 
         # DB에 작업 기록 생성
         self.job_id = self.db.create_job({
@@ -159,11 +160,13 @@ class DrawingEngine:
 
     def stop(self):
         self._stop_evt.set()
-        self._pause_evt.set()  # 일시정지 상태에서도 stop 가능하도록
+        self._pause_evt.set()  # 일시정지 상태에서도 stop 감지되도록
+        self.robot.abort()     # DSR move_stop + _abort 플래그
 
     def pause(self):
         if self.status == 'running':
             self._pause_evt.clear()
+            self.robot.pause_motion()
             self.status = 'paused'
             self.message = '일시정지'
             self._emit_progress()
@@ -174,6 +177,7 @@ class DrawingEngine:
             self.message = '재개 중...'
             self._emit_progress()
             self._pause_evt.set()
+            self.robot.resume_motion()
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -202,39 +206,70 @@ class DrawingEngine:
         if dry_run:
             self._emit_log("건식 실행 모드 — 실제 이동 없음", "WARNING")
         else:
-            self._emit_log("연필 파지 중...")
-            self.robot.pencil_grip()
-            self._emit_log("연필 파지 완료")
+            try:
+                # 펜 잡기 전 종이 확인
+                self._emit_log("종이 확인 중...")
+                while not self.robot.check_paper():
+                    if self.robot._check_abort():
+                        self._finish("cancelled", 0)
+                        return
+                    self._emit_log("종이 미감지", "WARNING")
+                    if not self.robot.wait_for_confirm("종이를 그림판에 올려놓고 확인을 눌러주세요"):
+                        self._finish("failed", 0)
+                        return
+                self._emit_log("종이 확인 완료")
 
-            if path:
-                first = path[0]
-                self._emit_log("첫 픽셀 위치로 이동 후 Z 자동 측정...")
-                travel_z = float(calib.get("travel_z") or (first["z_up"] + 10.0))
-                self.robot.move_to_xy(first["rx"], first["ry"], travel_z)
-                z_result = None
-                for attempt in range(3):
-                    try:
-                        z_result = self.robot.auto_calibrate_z()
-                        break
-                    except Exception as e:
-                        self._emit_log(f"Z 측정 실패 ({attempt+1}/3): {e} — Y방향 힘 적용 후 재시도", "WARNING")
-                        self.robot.nudge_y()
-                if z_result is None:
-                    self._emit_log("Z 측정 3회 실패 — 그리기 취소", "ERROR")
-                    self._finish("failed", 0)
+                if self.robot._check_abort():
+                    self._finish("cancelled", 0)
                     return
-                new_z_up = z_result["pen_up_z"]
-                new_z_dn = z_result["pen_down_z"]
-                self.db.update_calibration_z(new_z_up, new_z_dn)
-                for step in path:
-                    step["z_up"] = new_z_up
-                    step["z_dn"] = new_z_dn
-                self._emit_log(f"Z 측정 완료: pen_up={new_z_up}mm, pen_down={new_z_dn}mm")
+
+                self._emit_log("연필 파지 중...")
+                self.robot.pencil_grip()
+                self._emit_log("연필 파지 완료")
+
+                if self.robot._check_abort():
+                    self._finish("cancelled", 0)
+                    return
+
+                if path:
+                    first = path[0]
+                    self._emit_log("첫 픽셀 위치로 이동 후 Z 자동 측정...")
+                    travel_z = float(calib.get("travel_z") or (first["z_up"] + 10.0))
+                    self.robot.move_to_xy(first["rx"], first["ry"], travel_z)
+                    z_result = None
+                    for attempt in range(3):
+                        if self.robot._check_abort():
+                            break
+                        try:
+                            z_result = self.robot.auto_calibrate_z()
+                            break
+                        except Exception as e:
+                            self._emit_log(f"Z 측정 실패 ({attempt+1}/3): {e} — Y방향 힘 적용 후 재시도", "WARNING")
+                            self.robot.nudge_y()
+                    if z_result is None:
+                        if self.robot._check_abort():
+                            self._finish("cancelled", 0)
+                        else:
+                            self._emit_log("Z 측정 3회 실패 — 그리기 취소", "ERROR")
+                            self._finish("failed", 0)
+                        return
+                    new_z_up = z_result["pen_up_z"]
+                    new_z_dn = z_result["pen_down_z"]
+                    self.db.update_calibration_z(new_z_up, new_z_dn)
+                    for step in path:
+                        step["z_up"] = new_z_up
+                        step["z_dn"] = new_z_dn
+                    self._emit_log(f"Z 측정 완료: pen_up={new_z_up}mm, pen_down={new_z_dn}mm")
+            except Exception as e:
+                import traceback
+                self._emit_log(f"준비 단계 오류: {e}\n{traceback.format_exc()}", "ERROR")
+                self._finish("failed", 0)
+                return
 
         try:
             for i, step in enumerate(path):
-                # 중단 요청 확인
-                if self._stop_evt.is_set():
+                # 중단 요청 확인 (강제정지 또는 E-STOP)
+                if self._stop_evt.is_set() or self.robot._check_abort():
                     self._finish("cancelled", i)
                     return
                 # 일시정지 대기
@@ -284,12 +319,15 @@ class DrawingEngine:
         }.get(final_status, "완료")
 
         self.db.finish_job(self.job_id, final_status, completed, duration)
-        try:
-            self._emit_log("연필 반납 중...")
-            self.robot.pencil_release()
-            self._emit_log("연필 반납 완료")
-        except Exception as e:
-            self._emit_log(f"연필 반납 실패 (무시): {e}", "WARNING")
+        if not self.robot._abort:
+            try:
+                self._emit_log("연필 반납 중...")
+                self.robot.pencil_release()
+                self._emit_log("연필 반납 완료")
+            except Exception as e:
+                self._emit_log(f"연필 반납 실패 (무시): {e}", "WARNING")
+        else:
+            self._emit_log("강제정지 — 연필 반납 생략")
 
         if final_status == "success":
             try:
