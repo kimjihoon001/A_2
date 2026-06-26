@@ -174,6 +174,11 @@ class RobotArtNode(Node):
             self.robot.set_status("running")
             try:
                 fn(*args)
+            except Exception as e:
+                import traceback
+                msg = f"동작 오류: {e}\n{traceback.format_exc()}"
+                self.get_logger().error(msg)
+                self._pub_log(f"동작 오류: {e}", "ERROR")
             finally:
                 self.robot.set_status("idle")
         threading.Thread(target=_target, daemon=True).start()
@@ -273,9 +278,13 @@ def main():
     executor = MultiThreadedExecutor()
     executor.add_node(node)
     try:
-        executor.spin()
-    except KeyboardInterrupt:
-        pass
+        while rclpy.ok():
+            try:
+                executor.spin_once(timeout_sec=1.0)
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                log.error(f"executor spin 오류 (계속 실행): {e}")
     finally:
         node.destroy_node()
         rclpy.shutdown()

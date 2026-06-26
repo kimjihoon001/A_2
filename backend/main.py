@@ -245,40 +245,48 @@ def _current_robot_state() -> dict:
 # ── 브리지 스레드 (SingleThreadedExecutor) ───────────────────────
 def _ros_spin():
     from rclpy.executors import SingleThreadedExecutor
-    executor = SingleThreadedExecutor()
-    executor.add_node(_bridge)
-    try:
-        executor.spin()
-    except Exception:
-        pass
+    while True:
+        try:
+            executor = SingleThreadedExecutor()
+            executor.add_node(_bridge)
+            executor.spin()
+        except BaseException as e:
+            # SystemExit / KeyboardInterrupt 포함 — 스레드가 죽으면 프로세스 전체가 죽으므로
+            # 예외를 삼키고 1초 후 재시작해서 ROS2 spin을 유지
+            log.error(f"ROS2 spin 예외 (1초 후 재시작): {e}")
+            time.sleep(1)
 
 
 # ── 상태 주기 브로드캐스트 ──────────────────────────────────────
 async def _status_broadcast_loop():
     while True:
-        await asyncio.sleep(STATUS_INTERVAL_SEC)
-        if not _clients:
-            continue
+        try:
+            await asyncio.sleep(STATUS_INTERVAL_SEC)
+            if not _clients:
+                continue
 
-        dsr_connected = _bridge._dsr_connected if _bridge else False
+            dsr_connected = _bridge._dsr_connected if _bridge else False
 
-        # robot 상태 조립 — robot_art_node가 SDK 직접 폴링한 값 사용
-        robot = _last_status.get("robot", {}) if _last_status else {}
-        if _bridge:
-            robot = {
-                **robot,
-                "connected"    : dsr_connected,
-                "powered"      : dsr_connected,
-                "ros2"         : dsr_connected,
+            robot = _last_status.get("robot", {}) if _last_status else {}
+            if _bridge:
+                robot = {
+                    **robot,
+                    "connected"    : dsr_connected,
+                    "powered"      : dsr_connected,
+                    "ros2"         : dsr_connected,
+                }
+
+            status_data = {
+                **(_last_status or {}),
+                "type"      : "status",
+                "nodeOnline": dsr_connected,
+                "robot"     : robot,
             }
-
-        status_data = {
-            **(_last_status or {}),
-            "type"      : "status",
-            "nodeOnline": dsr_connected,
-            "robot"     : robot,
-        }
-        await broadcast(status_data)
+            await broadcast(status_data)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.error(f"상태 브로드캐스트 오류: {e}")
 
 
 # ── WebSocket 브로드캐스트 ───────────────────────────────────────
