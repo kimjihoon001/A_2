@@ -853,6 +853,20 @@ class RobotController:
         time.sleep(0.3)
         log.info("Y방향 nudge 완료")
 
+    def _fix_wrist_spin(self):
+        """J6(손목)이 ±340°를 초과하면 movej로 ±0° 근처로 정규화."""
+        if not _dsr_available:
+            return
+        joints = _dsr_funcs['get_current_posj']()
+        if not joints or abs(joints[5]) <= 340:
+            return
+        target_j6 = joints[5] % 360
+        if target_j6 > 180:
+            target_j6 -= 360
+        log.warning(f"J6 손목 스핀 보정: {joints[5]:.1f}° → {target_j6:.1f}°")
+        new_joints = list(joints[:5]) + [target_j6]
+        _dsr_funcs['movej'](_dsr_funcs['posj'](*new_joints), vel=10, acc=20)
+
     def move_to_xy(self, rx: float, ry: float, z_up: float):
         """지정 X,Y로 안전 Z 높이에서 이동 (Z 측정 전 위치 이동용)."""
         if not _dsr_available:
@@ -861,6 +875,8 @@ class RobotController:
         movel = _dsr_funcs['movel']
         target = posx(rx, ry, z_up, 0, 180, 0)
         movel(target, vel=[self._move_speed, 30], acc=[self._move_speed * 2, 60])
+        # Z 캘리브레이션 전 손목 스핀 누적 방지
+        self._fix_wrist_spin()
 
     # ── 자동 Z 캘리브레이션 ──────────────────────────────────────
     def auto_calibrate_z(self) -> dict:
@@ -888,6 +904,9 @@ class RobotController:
         cur_rx, cur_ry, cur_rz = float(tcp_pos[3]), float(tcp_pos[4]), float(tcp_pos[5])
 
         log.info(f"자동 Z 측정 시작: ({cur_x:.1f}, {cur_y:.1f}), 현재 Z={cur_z:.1f}")
+
+        # 포스 컨트롤 전 손목 스핀 보정 (J6 ±360° 초과 방지)
+        self._fix_wrist_spin()
 
         start_pos = posx(cur_x, cur_y, cur_z, cur_rx, cur_ry, cur_rz)
 
