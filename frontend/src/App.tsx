@@ -65,6 +65,7 @@ export default function App() {
   const penForceRef    = useRef({ min: 10, max: 50 });
   const logsRef        = useRef<(msg: string) => void>(() => {});
   const alarmsRef      = useRef<(level: Alarm['level'], msg: string) => void>(() => {});
+  const lastActionTimeRef = useRef<number>(0);
 
   function addLog(msg: string)   { setLogs(l => [...l, { id: uid(), time: nowStr(), msg }]); }
   function addAlarm(level: Alarm['level'], msg: string) { setAlarms(a => [...a, { id: uid(), level, msg, time: nowStr() }]); }
@@ -74,10 +75,12 @@ export default function App() {
   // ── Python 서버 WebSocket 연결 ──────────────────────────────
   const server = useRobotServer(serverUrl, {
     onRobotState: (state) => {
+      // 사용자가 E-STOP/해제를 누른 직후(1.5초 이내)에는 서버의 과거 상태(딜레이된 패킷)를 무시합니다.
+      if (Date.now() - lastActionTimeRef.current < 1500) return;
+
       setRobotState(prev => ({
         ...prev,
-        ...(state.status && (prev.status !== 'estop' || state.status === 'estop')
-            && { status: state.status as RobotStatus }),
+        ...(state.status           && { status:    state.status as RobotStatus }),
         ...(state.joints           && { joints:    state.joints }),
         ...(state.tcpX  != null    && { tcpX:      state.tcpX }),
         ...(state.tcpY  != null    && { tcpY:      state.tcpY }),
@@ -195,15 +198,15 @@ export default function App() {
 
   // ── E-STOP ──────────────────────────────────────────────────
   function handleEstop() {
+    lastActionTimeRef.current = Date.now();
     if (serverConnected) server.estop();
     setRobotState(s => ({ ...s, status: 'estop', speed: 0 }));
     addAlarm('error', '비상정지 활성화됨');
     addLog('E-STOP 활성화');
   }
   function handleResetEstop() {
+    lastActionTimeRef.current = Date.now();
     if (serverConnected) server.resetEstop();
-    // 서버 연결 여부와 무관하게 로컬 상태를 즉시 해제
-    // (onRobotState 가드가 서버 브로드캐스트의 'idle'을 막으므로 여기서 직접 처리)
     setRobotState(s => ({ ...s, status: 'idle' }));
     addAlarm('info', '비상정지 해제됨');
     addLog('E-STOP 해제');
