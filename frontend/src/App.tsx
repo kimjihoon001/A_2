@@ -288,6 +288,11 @@ export default function App() {
         onPause={handlePause}
         onResume={handleResume}
         onGoHome={handleGoHome}
+        onPencilGrip={() => { if (serverConnected) server.pencilGrip(); addLog('[관리자] 연필 파지 시작'); }}
+        onPencilRelease={() => { if (serverConnected) server.pencilRelease(); addLog('[관리자] 연필 반납 시작'); }}
+        onGripperOpen={() => { if (serverConnected) server.gripperOpen(); addLog('[관리자] 그리퍼 열기'); }}
+        onGripperClose={() => { if (serverConnected) server.gripperClose(); addLog('[관리자] 그리퍼 닫기'); }}
+        onFrameTask={() => { if (serverConnected) server.frameTask(); addLog('[관리자] 액자 작업 시작'); }}
         addLog={addLog}
       />
     ),

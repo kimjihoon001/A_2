@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import type { DrawingState, RobotState } from '../types';
 import { DRAWING_STATUS_LABEL, DRAWING_STATUS_COLOR } from '../constants';
 
@@ -8,10 +9,15 @@ interface Props {
   onPause: () => void;
   onResume: () => void;
   onGoHome: () => void;
+  onPencilGrip: () => void;
+  onPencilRelease: () => void;
+  onGripperOpen: () => void;
+  onGripperClose: () => void;
+  onFrameTask: () => void;
   addLog: (msg: string) => void;
 }
 
-export default function DrawingControl({ drawingState, robotState, onStop, onPause, onResume, onGoHome, addLog }: Props) {
+export default function DrawingControl({ drawingState, robotState, onStop, onPause, onResume, onGoHome, onPencilGrip, onPencilRelease, onGripperOpen, onGripperClose, onFrameTask, addLog }: Props) {
   const {
     status, currentPixel, totalPixels, resWidth,
     currentGray, targetForce, currentPenForce,
@@ -22,6 +28,19 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
   const isRunning  = status === 'running';
   const isPaused   = status === 'paused';
   const isActive   = isRunning || isPaused;
+
+  // 개별 동작(연필파지 등) 실행 중 여부 — robotState.status로 감지
+  const isRobotBusy = robotState.status === 'running' && !isActive;
+  // 일시정지 상태 로컬 트래킹 (개별 동작 중 일시정지 반영)
+  const [motionPaused, setMotionPaused] = useState(false);
+  useEffect(() => {
+    if (robotState.status === 'idle' && !isActive) setMotionPaused(false);
+  }, [robotState.status, isActive]);
+
+  const canPause  = (isRunning || isRobotBusy) && !motionPaused;
+  const canResume = isPaused || motionPaused;
+  const canStop   = isActive || isRobotBusy;
+
   const currentRow = resWidth > 0 ? Math.floor(currentPixel / resWidth) : 0;
   const currentCol = resWidth > 0 ? currentPixel % resWidth : 0;
 
@@ -32,6 +51,13 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
   const statusColor = DRAWING_STATUS_COLOR[status];
   const statusLabel = DRAWING_STATUS_LABEL[status];
 
+  // 상태에 따른 반짝 애니메이션
+  const pulseStyle = (isRunning || isRobotBusy)
+    ? { animation: 'pulse 1s ease-in-out infinite' }
+    : (isPaused || motionPaused)
+    ? { animation: 'pulse 2s ease-in-out infinite' }
+    : {};
+
   return (
     <div>
       <h2 style={{ marginBottom: 20, fontSize: 20, fontWeight: 700 }}>그림 제어</h2>
@@ -40,7 +66,16 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 16, marginBottom: 20, alignItems: 'start' }}>
         <div className="card" style={{ borderLeft: `3px solid ${statusColor}` }}>
           <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>현재 상태</div>
-          <div style={{ fontSize: 26, fontWeight: 800, color: statusColor, marginBottom: 4 }}>{statusLabel}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <div style={{ fontSize: 26, fontWeight: 800, color: statusColor }}>{statusLabel}</div>
+            {(isRunning || isRobotBusy || isPaused || motionPaused) && (
+              <div style={{
+                width: 10, height: 10, borderRadius: '50%',
+                background: (isPaused || motionPaused) ? 'var(--yellow)' : statusColor,
+                ...pulseStyle,
+              }} />
+            )}
+          </div>
           <div style={{ fontSize: 12, color: 'var(--text2)' }}>{message}</div>
           {drawingState.imageName && (
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text2)' }}>
@@ -50,25 +85,52 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
           )}
         </div>
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 160 }}>
-          <button className="btn-outline" disabled={!isRunning}
+          <button className="btn-outline" disabled={!canPause}
             style={{ width: '100%' }}
-            onClick={() => { onPause(); addLog('[관리자] 일시정지'); }}>
+            onClick={() => { onPause(); setMotionPaused(true); addLog('[관리자] 일시정지'); }}>
             일시정지
           </button>
-          <button className="btn-success" disabled={!isPaused}
+          <button className="btn-success" disabled={!canResume}
             style={{ width: '100%' }}
-            onClick={() => { onResume(); addLog('[관리자] 재개'); }}>
+            onClick={() => { onResume(); setMotionPaused(false); addLog('[관리자] 재개'); }}>
             재개
           </button>
-          <button className="btn-danger" disabled={!isActive}
+          <button className="btn-danger" disabled={!canStop}
             style={{ width: '100%' }}
-            onClick={() => { onStop(); addLog('[관리자] 강제 정지'); }}>
+            onClick={() => { onStop(); setMotionPaused(false); addLog('[관리자] 강제 정지'); }}>
             강제정지
           </button>
-          <button className="btn-ghost" disabled={isActive}
+          <button className="btn-ghost" disabled={isActive || isRobotBusy}
             style={{ width: '100%' }}
             onClick={() => { onGoHome(); addLog('[관리자] 원점 복귀'); }}>
             원점복귀
+          </button>
+        </div>
+      </div>
+
+      {/* 로봇 개별 동작 제어 */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card-title">로봇 개별 동작</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
+          <button className="btn-outline" disabled={isActive || isRobotBusy}
+            onClick={() => { onPencilGrip(); addLog('[관리자] 연필 파지'); }}>
+            연필 파지
+          </button>
+          <button className="btn-outline" disabled={isActive || isRobotBusy}
+            onClick={() => { onPencilRelease(); addLog('[관리자] 연필 반납'); }}>
+            연필 반납
+          </button>
+          <button className="btn-outline" disabled={isActive || isRobotBusy}
+            onClick={() => { onGripperOpen(); addLog('[관리자] 그리퍼 열기'); }}>
+            그리퍼 열기
+          </button>
+          <button className="btn-outline" disabled={isActive || isRobotBusy}
+            onClick={() => { onGripperClose(); addLog('[관리자] 그리퍼 닫기'); }}>
+            그리퍼 닫기
+          </button>
+          <button className="btn-outline" disabled={isActive || isRobotBusy}
+            onClick={() => { onFrameTask(); addLog('[관리자] 액자 작업 시작'); }}>
+            액자 작업
           </button>
         </div>
       </div>

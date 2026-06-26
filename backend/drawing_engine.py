@@ -164,20 +164,20 @@ class DrawingEngine:
         self.robot.abort()     # DSR move_stop + _abort 플래그
 
     def pause(self):
+        self.robot.pause_motion()  # 그림·개별동작 모두 정지
         if self.status == 'running':
             self._pause_evt.clear()
-            self.robot.pause_motion()
             self.status = 'paused'
             self.message = '일시정지'
             self._emit_progress()
 
     def resume(self):
+        self.robot.resume_motion()  # 그림·개별동작 모두 재개
         if self.status == 'paused':
             self.status = 'running'
             self.message = '재개 중...'
             self._emit_progress()
             self._pause_evt.set()
-            self.robot.resume_motion()
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()

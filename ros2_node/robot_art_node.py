@@ -168,14 +168,24 @@ class RobotArtNode(Node):
         res.message = '원점 복귀 시작'
         return res
 
+    def _run_op(self, fn, *args):
+        """개별 동작을 별도 스레드로 실행하고 robot status를 running/idle로 관리."""
+        def _target():
+            self.robot.set_status("running")
+            try:
+                fn(*args)
+            finally:
+                self.robot.set_status("idle")
+        threading.Thread(target=_target, daemon=True).start()
+
     def _svc_gripper_open(self, req, res):
-        threading.Thread(target=self.robot.gripper_open, daemon=True).start()
+        self._run_op(self.robot.gripper_open)
         res.success = True
         res.message = '그리퍼 열기'
         return res
 
     def _svc_gripper_close(self, req, res):
-        threading.Thread(target=self.robot.gripper_close, daemon=True).start()
+        self._run_op(self.robot.gripper_close)
         res.success = True
         res.message = '그리퍼 닫기'
         return res
@@ -185,7 +195,7 @@ class RobotArtNode(Node):
             res.success = False
             res.message = '그리기 중에는 연필 파지 불가'
             return res
-        threading.Thread(target=self.robot.pencil_grip, daemon=True).start()
+        self._run_op(self.robot.pencil_grip)
         res.success = True
         res.message = '연필 파지 시작'
         return res
@@ -195,7 +205,7 @@ class RobotArtNode(Node):
             res.success = False
             res.message = '그리기 중에는 연필 반납 불가'
             return res
-        threading.Thread(target=self.robot.pencil_release, daemon=True).start()
+        self._run_op(self.robot.pencil_release)
         res.success = True
         res.message = '연필 반납 시작'
         return res
@@ -205,7 +215,7 @@ class RobotArtNode(Node):
             res.success = False
             res.message = '그리기 중에는 액자 작업 불가'
             return res
-        threading.Thread(target=self.robot.run_frame_task, daemon=True).start()
+        self._run_op(self.robot.run_frame_task)
         res.success = True
         res.message = '액자 작업 시작'
         return res
