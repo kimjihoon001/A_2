@@ -4,16 +4,16 @@ import { DRAWING_STATUS_LABEL, DRAWING_STATUS_COLOR } from '../constants';
 
 type StepAction = 'paperCheck' | 'pencilGrip' | 'pencilRelease' | 'frameLower' | 'framePaperPickup' | 'frameAlign' | 'frameUpper' | 'frameEject';
 
-const STEPS: { key: string; action?: StepAction; pausable?: boolean }[] = [
+const STEPS: { key: string; action?: StepAction; noPause?: boolean }[] = [
   { key: '종이확인',  action: 'paperCheck' },
   { key: '연필파지',  action: 'pencilGrip' },
-  { key: '그리기',    pausable: true },
+  { key: '그리기' },
   { key: '연필반납',  action: 'pencilRelease' },
   { key: '액자하판',  action: 'frameLower' },
   { key: '종이픽업',  action: 'framePaperPickup' },
-  { key: '정렬1차',   action: 'frameAlign' },
+  { key: '정렬1차',   action: 'frameAlign',  noPause: true },
   { key: '액자상판',  action: 'frameUpper' },
-  { key: '정렬2차',   action: 'frameAlign' },
+  { key: '정렬2차',   action: 'frameAlign',  noPause: true },
   { key: '액자배출',  action: 'frameEject' },
 ];
 
@@ -71,12 +71,7 @@ export default function DrawingControl({
   const statusColor = DRAWING_STATUS_COLOR[status];
   const statusLabel = DRAWING_STATUS_LABEL[status];
 
-  // 상태에 따른 반짝 애니메이션
-  const pulseStyle = isRunning
-    ? { animation: 'pulse 1s ease-in-out infinite' }
-    : isPaused
-    ? { animation: 'pulse 2s ease-in-out infinite' }
-    : {};
+  const pulseStyle = {};
 
   return (
     <div>
@@ -122,11 +117,10 @@ export default function DrawingControl({
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-title">동작 단계</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
-          {STEPS.map(({ key: step, action }) => {
+          {STEPS.map(({ key: step, action, noPause }) => {
             const engineActive  = step === currentStep;
             const indivActive   = step === runningStep;
             const active        = engineActive || indivActive;
-            const blinking      = (engineActive && !isPaused) || indivActive;
             const color         = active
               ? (isPaused && engineActive ? 'var(--yellow)' : 'var(--accent)')
               : 'var(--border)';
@@ -148,13 +142,13 @@ export default function DrawingControl({
                 background: active ? 'var(--panel2)' : 'var(--panel)',
                 textAlign: 'center',
                 transition: 'border-color 0.2s, background 0.2s',
-                ...(blinking ? { animation: 'pulse 1s ease-in-out infinite' } : {}),
               }}>
                 <div style={{
                   fontSize: 12, fontWeight: active ? 700 : 400,
                   color: active ? 'var(--text)' : 'var(--text2)',
                   marginBottom: 8,
                 }}>{step}</div>
+                {!noPause && (
                 <div style={{ display: 'flex', gap: 3, justifyContent: 'center', marginBottom: runFn ? 4 : 0 }}>
                   <button className="btn-outline" disabled={!engineActive || !canPause}
                     style={{ flex: 1, padding: '3px 0', fontSize: 10 }}
@@ -167,6 +161,7 @@ export default function DrawingControl({
                     재개
                   </button>
                 </div>
+                )}
                 {runFn && (
                   <button className="btn-outline" disabled={isActive || !!runningStep}
                     style={{ width: '100%', padding: '3px 0', fontSize: 10 }}

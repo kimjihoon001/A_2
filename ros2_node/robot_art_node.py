@@ -175,21 +175,36 @@ class RobotArtNode(Node):
         return res
 
     def _run_op(self, fn, *args):
-        """개별 동작을 별도 스레드로 실행하고 robot status를 running/idle로 관리."""
+        """개별 동작을 별도 스레드로 실행. 예외 발생 시 확인 팝업 → 재시도 루프."""
         def _target():
-            # 이전 강제정지/E-STOP으로 인한 abort/estop 플래그 초기화
             self.robot._abort = False
             self.robot._motion_pause_evt.set()
             with self.robot._lock:
                 self.robot.state.estop = False
             self.robot.set_status("running")
             try:
-                fn(*args)
-            except Exception as e:
-                import traceback
-                msg = f"동작 오류: {e}\n{traceback.format_exc()}"
-                self.get_logger().error(msg)
-                self._pub_log(f"동작 오류: {e}", "ERROR")
+                self.robot._fix_wrist_spin()
+                self.robot.home()
+                if self.robot._abort or self.robot.state.estop:
+                    return
+                while True:
+                    try:
+                        fn(*args)
+                        break
+                    except Exception as e:
+                        import traceback
+                        self.get_logger().error(f"동작 오류: {e}\n{traceback.format_exc()}")
+                        self._pub_log(f"동작 오류: {e}", "ERROR")
+                        if self.robot._abort or self.robot.state.estop:
+                            break
+                        retry = self.robot.wait_for_confirm(
+                            f"오류 발생:\n{e}\n\n재시도하려면 확인을 누르세요"
+                        )
+                        if not retry:
+                            break
+                        # 재시도 전 abort 플래그 초기화
+                        self.robot._abort = False
+                        self.robot._motion_pause_evt.set()
             finally:
                 self.robot.set_status("idle")
         threading.Thread(target=_target, daemon=True).start()

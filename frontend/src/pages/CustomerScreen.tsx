@@ -669,7 +669,6 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
                   <span style={{
                     display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
                     background: isPaused ? 'var(--yellow)' : 'var(--accent)',
-                    animation: 'pulse 1s ease-in-out infinite',
                     flexShrink: 0,
                   }} />
                 )}

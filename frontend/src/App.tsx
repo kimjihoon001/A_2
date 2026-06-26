@@ -397,6 +397,31 @@ export default function App() {
           {pages[activeTab] ?? pages.dashboard}
         </Layout>
       )}
+
+      {/* 준비 확인 팝업 — 모드 무관하게 표시 */}
+      {confirmRequest && mode !== 'customer' && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 2000,
+          background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'var(--panel)', borderRadius: 16,
+            padding: '36px 40px', maxWidth: 420, width: '90%',
+            boxShadow: '0 8px 48px rgba(0,0,0,0.4)',
+            border: '2px solid var(--yellow)', textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>준비 확인 필요</div>
+            <div style={{ fontSize: 15, color: 'var(--text2)', marginBottom: 28, lineHeight: 1.7 }}>{confirmRequest}</div>
+            <button className="btn-primary"
+              style={{ fontSize: 16, padding: '13px 48px', fontWeight: 800 }}
+              onClick={() => { setConfirmRequest(null); if (serverConnected) server.confirmRetry(); }}>
+              확인 (재시도)
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -462,6 +462,11 @@ class RobotController:
             self.state.status = "estop"
             self.state.speed  = 0.0
 
+        # 그리퍼 동작 중단 — 현재 너비로 즉시 재명령해 동작 중단
+        current_w = self.state.gripper_width
+        import threading as _th
+        _th.Thread(target=_gripper_move, args=(40, current_w), daemon=True).start()
+
         if _dsr_available:
             try:
                 import threading as _threading
@@ -531,7 +536,7 @@ class RobotController:
             try:
                 posj  = _dsr_funcs['posj']
                 movej = _dsr_funcs['movej']
-                home_pos = posj(8.5, 5.45, 82.85, 179.96, -91.70, -171.71)
+                home_pos = posj(-0.01, 0.01, 90.00, 180.02, -89.98, 0)
                 movej(home_pos, vel=30, acc=50)
                 with self._lock:
                     self.state.status = "idle"
@@ -1032,10 +1037,9 @@ class RobotController:
 
     def check_paper(self) -> bool:
         """그림판 위에 종이가 있는지 확인. 시뮬 모드는 항상 True."""
-        
         if not _dsr_available:
             return True
-
+        self._fix_wrist_spin()
         posx                = _dsr_funcs['posx']
         movel               = _dsr_funcs['movel']
         get_current_posx    = _dsr_funcs['get_current_posx']
@@ -1047,7 +1051,7 @@ class RobotController:
         DR_BASE       = _dsr_funcs['DR_BASE']
     
 
-        MIN_PAPER_Z = 330.1
+        MIN_PAPER_Z = 329
 
         pos_center = posx(563.03, 75.97, 328.62, 9.86, 180.00, 98.32)
         hover_pos  = posx(pos_center[0], pos_center[1], pos_center[2] + 20,
@@ -1063,7 +1067,7 @@ class RobotController:
 
         task_compliance_ctrl([500, 500, 500, 100, 100, 100])
         time.sleep(0.5)
-        set_desired_force([0, 0, -2, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
+        set_desired_force([0, 0, -1, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
         contact_z = None
         deadline  = time.time() + 15.0
         while time.time() < deadline:
@@ -1096,6 +1100,7 @@ class RobotController:
         if not _dsr_available:
             log.info("[시뮬] pencil_grip")
             return
+        self._fix_wrist_spin()
         movel = _dsr_funcs['movel']
         posx  = _dsr_funcs['posx']
 
@@ -1145,6 +1150,7 @@ class RobotController:
         if not _dsr_available:
             log.info("[시뮬] pencil_release")
             return
+        self._fix_wrist_spin()
         movel = _dsr_funcs['movel']
         posx  = _dsr_funcs['posx']
 
@@ -1235,6 +1241,7 @@ class RobotController:
     def frame_paper_pickup(self):
         """종이 슬라이딩 & 픽업"""
         if not _dsr_available: log.info("[시뮬] frame_paper_pickup"); return
+        self._fix_wrist_spin()
         movel, movej, amovel, posx, posj, tcc, sdf, rf, rcc, gcpx, FC_REL, BASE = self._dsr()
         if self.on_step_change: self.on_step_change("종이픽업")
         log.info("종이 픽업 시작")
@@ -1290,6 +1297,7 @@ class RobotController:
     def frame_align(self):
         """종이 정렬 캘리브레이션 (Y→X 방향 밀기)"""
         if not _dsr_available: log.info("[시뮬] frame_align"); return
+        self._fix_wrist_spin()
         movel, movej, amovel, posx, posj, tcc, sdf, rf, rcc, gcpx, FC_REL, BASE = self._dsr()
         pos_paper_caly0 = posx(286.07, 158.74, 340.07, 68.05, 179.95, 159.14)
         pos_paper_caly1 = posx(286.07, 158.74, 290.07, 68.05, 179.95, 159.14)
@@ -1319,6 +1327,7 @@ class RobotController:
     def frame_upper_plate(self):
         """액자 상판 배치"""
         if not _dsr_available: log.info("[시뮬] frame_upper_plate"); return
+        self._fix_wrist_spin()
         movel, movej, amovel, posx, posj, tcc, sdf, rf, rcc, gcpx, FC_REL, BASE = self._dsr()
         if self.on_step_change: self.on_step_change("액자상판")
         log.info("액자 상판 배치 시작")
@@ -1467,7 +1476,7 @@ class RobotController:
         DR_FC_MOD_REL = _dsr_funcs['DR_FC_MOD_REL']
         DR_MV_MOD_REL = _dsr_funcs['DR_MV_MOD_REL']
 
-        home_pos = posj(8.5, 5.45, 82.85, 179.96, -91.70, -171.71)
+        home_pos = posj(-0.01, 0.01, 90.00, 180.02, -89.98, 0)
 
         with self._lock:
             self.state.status = "running"
