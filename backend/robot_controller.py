@@ -485,6 +485,9 @@ class RobotController:
         with self._lock:
             self.state.estop  = False
             self.state.status = "idle"
+        # 강제정지로 설정된 abort 플래그 해제 — 이후 개별 동작 가능하도록
+        self._abort = False
+        self._motion_pause_evt.set()
 
     # ── 이동 ────────────────────────────────────────────────────
     def home(self):

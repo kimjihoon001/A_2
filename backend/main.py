@@ -55,7 +55,7 @@ class BridgeNode(Node):
             name: self.create_client(Trigger, f'/robot_art/{name}')
             for name in ('start', 'stop', 'pause', 'resume', 'home',
                          'gripper_open', 'gripper_close', 'pencil_grip', 'pencil_release', 'calibrate_z', 'frame_task',
-                         'confirm_retry')
+                         'confirm_retry', 'release_estop')
         }
 
         # DSR 직접 서비스 클라이언트 (estop/release/연결확인)
@@ -353,9 +353,11 @@ async def handle_command(ws: WebSocket, msg: dict):
         await broadcast({"type": "log", "level": "INFO", "message": result['message']})
 
     elif cmd == "stop":
-        result = await asyncio.to_thread(_bridge.call_service, 'stop')
-        db.add_log("그리기 중단 요청 (HMI)", "WARNING")
-        await ws.send_text(json.dumps({"type": "log", "level": "WARNING", "message": result['message']}))
+        # 강제정지 = E-STOP: engine 중단 후 서보 OFF
+        await asyncio.to_thread(_bridge.call_service, 'stop')
+        await asyncio.to_thread(_bridge.call_estop)
+        db.add_log("강제정지 (서보 OFF)", "WARNING")
+        await broadcast({"type": "log", "level": "WARNING", "message": "강제정지 — 서보 OFF"})
 
     elif cmd == "estop":
         result = await asyncio.to_thread(_bridge.call_estop)
@@ -363,9 +365,10 @@ async def handle_command(ws: WebSocket, msg: dict):
         await broadcast({"type": "log", "level": "ERROR", "message": result['message']})
 
     elif cmd == "reset_estop":
-        result = await asyncio.to_thread(_bridge.call_release_estop)
+        # robot_art_node 경유 — release_estop()이 _abort 플래그도 리셋
+        result = await asyncio.to_thread(_bridge.call_service, 'release_estop', 10.0)
         db.add_log("E-STOP 해제", "INFO")
-        await broadcast({"type": "log", "level": "INFO", "message": result['message']})
+        await broadcast({"type": "log", "level": "INFO", "message": result.get('message', 'E-STOP 해제')})
 
     elif cmd == "home":
         result = await asyncio.to_thread(_bridge.call_service, 'home')
