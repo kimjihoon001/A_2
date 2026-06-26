@@ -54,7 +54,8 @@ class BridgeNode(Node):
         self._svc = {
             name: self.create_client(Trigger, f'/robot_art/{name}')
             for name in ('start', 'stop', 'pause', 'resume', 'home',
-                         'gripper_open', 'gripper_close', 'pencil_grip', 'pencil_release', 'calibrate_z', 'frame_task')
+                         'gripper_open', 'gripper_close', 'pencil_grip', 'pencil_release', 'calibrate_z', 'frame_task',
+                         'confirm_retry')
         }
 
         # DSR 직접 서비스 클라이언트 (estop/release/연결확인)
@@ -192,7 +193,10 @@ class BridgeNode(Node):
             data = json.loads(msg.data)
             _last_status = data
             _last_status_time = time.time()
-            # _status_broadcast_loop이 주기적으로 전송하므로 여기선 캐시만 갱신
+            # status 타입은 _status_broadcast_loop이 주기적으로 전송
+            # 그 외(draw_progress, confirm_request 등)는 즉시 브로드캐스트
+            if data.get('type') != 'status' and _loop:
+                asyncio.run_coroutine_threadsafe(broadcast(data), _loop)
         except Exception:
             pass
 
@@ -374,6 +378,9 @@ async def handle_command(ws: WebSocket, msg: dict):
         result = await asyncio.to_thread(_bridge.call_service, 'frame_task', 5.0)
         level = "INFO" if result['success'] else "ERROR"
         await broadcast({"type": "log", "level": level, "message": result['message']})
+
+    elif cmd == "confirm_retry":
+        await asyncio.to_thread(_bridge.call_service, 'confirm_retry')
 
     elif cmd == "jog":
         axis  = int(msg.get('axis',  6))

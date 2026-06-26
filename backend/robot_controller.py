@@ -133,7 +133,7 @@ def _init_dsr() -> bool:
 
         from DSR_ROBOT2 import (
             set_robot_mode, set_tool,
-            movel, movej, amovel, move_home,
+            movel, movej, amovel, mwait, move_home,
             get_current_posj, get_current_posx, get_robot_state,
             posx, posj,
             DR_BASE, DR_MV_MOD_ABS, DR_MV_MOD_REL,
@@ -160,6 +160,7 @@ def _init_dsr() -> bool:
             'movel':                    movel,
             'movej':                    movej,
             'amovel':                   amovel,
+            'mwait':                    mwait,
             'move_home':                move_home,
             'get_current_posj':         get_current_posj,
             'get_current_posx':         get_current_posx,
@@ -268,6 +269,22 @@ class RobotController:
         self._move_speed   = float(MOVE_SPEED)
         self._dot_hold_sec = float(DOT_HOLD_SEC)
         self.robot_ip, self.robot_port = _read_dsr_robot_params()
+        self._confirm_evt: threading.Event = threading.Event()
+        self.on_confirm_request = None  # (message: str) -> None
+
+    def wait_for_confirm(self, message: str) -> bool:
+        """HMI에 팝업 요청 후 사용자가 확인할 때까지 대기. estop 시 False 반환."""
+        if self.on_confirm_request:
+            self.on_confirm_request(message)
+        self._confirm_evt.clear()
+        while not self._confirm_evt.wait(timeout=0.5):
+            if self.state.estop:
+                return False
+        return True
+
+    def confirm(self):
+        """HMI에서 확인 버튼 눌렸을 때 호출."""
+        self._confirm_evt.set()
 
     def load_config(self):
         """드로잉 시작 전 DB에서 속도 설정 로드."""
@@ -642,20 +659,27 @@ class RobotController:
                     mod=DR_FC_MOD_REL,
                 )
                 # 실제 힘이 목표의 70%에 도달할 때까지 대기 (최대 1.5초)
+                # self.state.tool_force는 구독 미구현으로 항상 0이므로 get_tool_force() 직접 호출
                 t0 = time.time()
                 deadline = t0 + 1.5
                 while time.time() < deadline:
                     if self.state.estop:
                         return
-                    with self._lock:
-                        fz = abs(self.state.tool_force[2]) if len(self.state.tool_force) > 2 else 0
+                    try:
+                        f = _dsr_funcs['get_tool_force']()
+                        fz = abs(f[2]) if f and len(f) > 2 else 0.0
+                    except Exception:
+                        fz = 0.0
                     if fz >= force * 0.7:
                         log.info(f"힘 도달: {fz:.2f}N / 목표 {force}N ({(time.time()-t0)*1000:.0f}ms)")
                         break
                     time.sleep(0.02)
                 else:
-                    with self._lock:
-                        fz = abs(self.state.tool_force[2]) if len(self.state.tool_force) > 2 else 0
+                    try:
+                        f = _dsr_funcs['get_tool_force']()
+                        fz = abs(f[2]) if f and len(f) > 2 else 0.0
+                    except Exception:
+                        fz = 0.0
                     log.warning(f"힘 도달 타임아웃 (현재 {fz:.2f}N / 목표 {force}N)")
 
                 with self._lock:
@@ -675,6 +699,9 @@ class RobotController:
                                vel=10, acc=20, ref=DR_BASE, mod=DR_MV_MOD_REL)
                         time.sleep(0.03)
                         direction *= -1
+                # amovel은 비동기라 모션이 끝나기 전에 release_force를 호출하면
+                # DSR이 거부함(state[TASK_MOTION] rejected). mwait으로 완료 대기
+                _dsr_funcs['mwait']()
 
             finally:
                 # 힘 해제 후 상공 복귀
@@ -898,10 +925,11 @@ class RobotController:
 
             current_width = _gripper_read_width()
             if current_width is not None and current_width < 15.0:
-                log.error(f"연필 파지 실패 (폭={current_width}mm) — 재시도")
+                log.error(f"연필 파지 실패 (폭={current_width}mm) — 확인 대기")
                 self.gripper_open()
                 movel(pos_up, vel=[100, 100], acc=[50, 50], mod=0)
-                time.sleep(10.0)
+                if not self.wait_for_confirm("연필을 연필통에 넣고 확인을 눌러주세요"):
+                    return
                 continue
 
             log.info(f"연필 파지 완료 (폭={current_width}mm)")
@@ -989,10 +1017,11 @@ class RobotController:
             time.sleep(0.5)
             w = _gripper_read_width()
             if w is not None and w < 15.0:
-                log.error(f"액자 하판 파지 실패 (폭={w}mm) — 재시도")
+                log.error(f"액자 하판 파지 실패 (폭={w}mm) — 확인 대기")
                 self.gripper_open()
                 movej(pos_lowframe_start_hover, vel=30, acc=50)
-                time.sleep(10)
+                if not self.wait_for_confirm("액자 하판을 보관함에 넣고 확인을 눌러주세요"):
+                    return
                 continue
             log.info(f"액자 하판 파지 완료 (폭={w}mm)")
             if not _chk(): return
@@ -1040,7 +1069,8 @@ class RobotController:
                 time.sleep(0.1)
                 release_compliance_ctrl()
                 movel(hover_pos, vel=50, acc=50, mod=0)
-                time.sleep(10)
+                if not self.wait_for_confirm("종이를 보관함에 넣고 확인을 눌러주세요"):
+                    return
                 continue
             break
 
@@ -1128,10 +1158,11 @@ class RobotController:
             time.sleep(0.5)
             w = _gripper_read_width()
             if w is not None and w < 15.0:
-                log.error(f"액자 상판 파지 실패 (폭={w}mm) — 재시도")
+                log.error(f"액자 상판 파지 실패 (폭={w}mm) — 확인 대기")
                 self.gripper_open()
                 movel(pos_frame_highstart_hover, vel=30, acc=50)
-                time.sleep(10)
+                if not self.wait_for_confirm("액자 상판을 보관함에 넣고 확인을 눌러주세요"):
+                    return
                 continue
             log.info(f"액자 상판 파지 완료 (폭={w}mm)")
             if not _chk(): return

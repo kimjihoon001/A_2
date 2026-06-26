@@ -88,6 +88,7 @@ class DrawingEngine:
     def __init__(self, robot: RobotController, db: Database):
         self.robot    = robot
         self.db       = db
+        self.robot.on_confirm_request = self._on_robot_confirm_request
         self._thread  : threading.Thread | None = None
         self._stop_evt: threading.Event = threading.Event()
         self._pause_evt: threading.Event = threading.Event()
@@ -105,6 +106,10 @@ class DrawingEngine:
         # HMI에 상태 전송하는 콜백 (main.py에서 주입)
         self.on_progress: Callable[[dict], None] | None = None
         self.on_log     : Callable[[str, str], None] | None = None
+
+    def _on_robot_confirm_request(self, message: str):
+        if self.on_progress:
+            self.on_progress({"type": "confirm_request", "message": message})
 
     def _emit_log(self, msg: str, level: str = "INFO"):
         log.info(f"[{level}] {msg}")

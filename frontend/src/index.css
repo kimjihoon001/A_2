@@ -109,3 +109,8 @@ thead tr { color: var(--text2); background: var(--panel2); }
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; }
 thead th { font-weight: 600; font-size: 12px; }
 tbody tr:hover { background: rgba(58,143,53,0.05); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}

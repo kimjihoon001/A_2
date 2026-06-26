@@ -7,13 +7,15 @@ interface Props {
   onStartDrawing: (pixels: PixelPoint[], settings: ArtSettings, imageName: string) => void;
   onCancelDrawing: () => void;
   onAdminClick: () => void;
+  confirmRequest?: string | null;
+  onConfirmRetry?: () => void;
 }
 
 type BottomPanel = 'adjust' | 'pixel' | null;
 
 function clamp(v: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, v)); }
 
-export default function CustomerScreen({ drawingState, onStartDrawing, onCancelDrawing, onAdminClick }: Props) {
+export default function CustomerScreen({ drawingState, onStartDrawing, onCancelDrawing, onAdminClick, confirmRequest, onConfirmRetry }: Props) {
   const [imageFile, setImageFile]         = useState<File | null>(null);
   const [originalUrl, setOriginalUrl]     = useState('');
   const [pixelData, setPixelData]         = useState<PixelPoint[]>([]);
@@ -310,17 +312,61 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
     });
   }
 
+  const [now, setNow] = useState(Date.now());
+
   const editMode   = bottomPanel === 'pixel';
   const isRunning  = drawingState.status === 'running';
   const isFinished = ['success', 'failed', 'cancelled'].includes(drawingState.status);
   const progress   = drawingState.totalPixels > 0
     ? Math.round((drawingState.currentPixel / drawingState.totalPixels) * 100) : 0;
-  const estMin     = Math.round(pixelData.length * 0.5 / 60);
   const frameLabel = FRAME_SIZES.find(f => f.key === artSettings.frameSizeKey)?.label ?? '';
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [isRunning]);
+
+  const elapsedSec = isRunning && drawingState.startTime
+    ? Math.max(0, (now - drawingState.startTime) / 1000) : 0;
+  const pxPerSec = elapsedSec > 2 && drawingState.currentPixel > 0
+    ? drawingState.currentPixel / elapsedSec : 0;
+  const remainSec = pxPerSec > 0
+    ? (drawingState.totalPixels - drawingState.currentPixel) / pxPerSec : null;
+  const estMin = Math.round(pixelData.length * 0.5 / 60);
 
   return (
     // Fragment: 메인 div와 fixed 패널을 형제로 — overflow:hidden 바깥에 패널 배치
     <>
+    {confirmRequest && (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <div style={{
+          background: 'var(--panel)', borderRadius: 16,
+          padding: '36px 40px', maxWidth: 420, width: '90%',
+          boxShadow: '0 8px 48px rgba(0,0,0,0.4)',
+          border: '2px solid var(--yellow)',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', marginBottom: 12 }}>
+            준비 확인 필요
+          </div>
+          <div style={{ fontSize: 15, color: 'var(--text2)', marginBottom: 28, lineHeight: 1.7 }}>
+            {confirmRequest}
+          </div>
+          <button
+            className="btn-primary"
+            style={{ fontSize: 16, padding: '13px 48px', fontWeight: 800 }}
+            onClick={onConfirmRetry}>
+            확인 (재시도)
+          </button>
+        </div>
+      </div>
+    )}
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
 
       {/* ── 헤더 ── */}
@@ -591,10 +637,21 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
       {/* ── 하단 바 ── */}
       <div style={{ padding: '12px 24px 20px', background: 'var(--panel)', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 28, marginBottom: 12, flexWrap: 'wrap' }}>
-          <Stat label="총 픽셀" value={pixelData.length > 0 ? pixelData.length.toLocaleString() : '—'} unit="픽셀" />
-          <Stat label="예상 소요" value={pixelData.length > 0 ? `~${estMin}` : '—'} unit="분" />
-          <Stat label="액자 크기" value={frameLabel || '—'} unit="" />
-          <Stat label="용지" value={artSettings.paperType} unit="" />
+          {isRunning ? (
+            <>
+              <Stat label="경과 시간" value={fmtSec(elapsedSec)} unit="" live />
+              <Stat label="남은 시간" value={remainSec != null ? fmtSec(remainSec) : '계산 중…'} unit="" live countdown />
+              <Stat label="속도" value={pxPerSec > 0 ? Math.round(pxPerSec * 60).toLocaleString() : '—'} unit="px/min" live />
+              <Stat label="완료 예정" value={remainSec != null ? fmtEta(remainSec) : '—'} unit="" />
+            </>
+          ) : (
+            <>
+              <Stat label="총 픽셀" value={pixelData.length > 0 ? pixelData.length.toLocaleString() : '—'} unit="픽셀" />
+              <Stat label="예상 소요" value={pixelData.length > 0 ? `~${estMin}` : '—'} unit="분" />
+              <Stat label="액자 크기" value={frameLabel || '—'} unit="" />
+              <Stat label="용지" value={artSettings.paperType} unit="" />
+            </>
+          )}
         </div>
 
         {(isRunning || isFinished) && (
@@ -772,11 +829,37 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
   );
 }
 
-function Stat({ label, value, unit }: { label: string; value: string; unit: string }) {
+function fmtSec(s: number) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+function fmtEta(remainSec: number) {
+  const eta = new Date(Date.now() + remainSec * 1000);
+  return eta.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function Stat({ label, value, unit, live, countdown }: {
+  label: string; value: string; unit: string; live?: boolean; countdown?: boolean;
+}) {
   return (
     <div>
-      <div style={{ fontSize: 11, color: 'var(--text2)' }}>{label}</div>
-      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+      <div style={{ fontSize: 11, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 4 }}>
+        {live && <span style={{
+          display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+          background: countdown ? '#f59e0b' : 'var(--accent)',
+          animation: 'pulse 1.2s ease-in-out infinite',
+        }} />}
+        {label}
+      </div>
+      <div style={{
+        fontSize: live ? 17 : 15, fontWeight: 700,
+        color: countdown ? '#f59e0b' : live ? 'var(--accent)' : 'var(--text)',
+        fontVariantNumeric: 'tabular-nums',
+      }}>
         {value} <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 400 }}>{unit}</span>
       </div>
     </div>

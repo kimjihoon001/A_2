@@ -48,6 +48,7 @@ export default function App() {
   const [robotState, setRobotState]     = useState<RobotState>(INITIAL_ROBOT);
   const [drawingState, setDrawingState] = useState<DrawingState>(INITIAL_DRAWING_STATE);
   const [calibration, setCalibration]     = useState<CalibrationData | null>(null);
+  const [confirmRequest, setConfirmRequest] = useState<string | null>(null);
   const [calibratedZ,  setCalibratedZ]   = useState<CalibrateZResult | null>(null);
   const [alarms, setAlarms] = useState<Alarm[]>([
     { id: uid(), level: 'info', msg: '시스템 시작됨', time: '00:00:00' },
@@ -154,6 +155,9 @@ export default function App() {
     onCalibrateZResult: (data) => {
       setCalibratedZ(data);
       addLog(`[Z 자동측정] 접촉=${data.contact_z}mm → pen_up=${data.pen_up_z}, pen_down=${data.pen_down_z} (자동 저장됨)`);
+    },
+    onConfirmRequest: (message) => {
+      setConfirmRequest(message);
     },
     onCalibrationLoad: (data) => {
       setCalibration(data as CalibrationData);
@@ -357,6 +361,11 @@ export default function App() {
           onStartDrawing={handleStartDrawing}
           onCancelDrawing={handleCancelDrawing}
           onAdminClick={() => setMode('login')}
+          confirmRequest={confirmRequest}
+          onConfirmRetry={() => {
+            setConfirmRequest(null);
+            if (serverConnected) server.confirmRetry();
+          }}
         />
       </div>
 
