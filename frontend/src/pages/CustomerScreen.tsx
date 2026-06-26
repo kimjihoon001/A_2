@@ -316,6 +316,8 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
 
   const editMode   = bottomPanel === 'pixel';
   const isRunning  = drawingState.status === 'running';
+  const isPaused   = drawingState.status === 'paused';
+  const isActive   = isRunning || isPaused;
   const isFinished = ['success', 'failed', 'cancelled'].includes(drawingState.status);
   const progress   = drawingState.totalPixels > 0
     ? Math.round((drawingState.currentPixel / drawingState.totalPixels) * 100) : 0;
@@ -397,7 +399,7 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
           margin: '12px 24px 0', padding: '12px 20px', flexShrink: 0,
           border: `2px dashed ${isDragging ? 'var(--accent)' : 'var(--border)'}`,
           borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14,
-          cursor: isRunning ? 'default' : 'pointer',
+          cursor: isActive ? 'default' : 'pointer',
           background: isDragging ? 'rgba(58,143,53,0.08)' : 'var(--panel)',
           transition: 'border-color 0.15s, background 0.15s',
         }}>
@@ -454,7 +456,7 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
                   ) : (
                     <>
                       <button className="btn-outline" style={{ fontSize: 11, padding: '3px 10px' }}
-                        disabled={isRunning}
+                        disabled={isActive}
                         onClick={() => { setCropMode(true); setCropRect(null); }}>✂️ 크롭</button>
                       {croppedUrl && (
                         <button className="btn-ghost" style={{ fontSize: 11, padding: '3px 10px' }}
@@ -582,7 +584,7 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 8 }}>
           <div>
             <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>액자 크기</div>
-            <select value={artSettings.frameSizeKey} onChange={e => setFrame(e.target.value)} disabled={isRunning}>
+            <select value={artSettings.frameSizeKey} onChange={e => setFrame(e.target.value)} disabled={isActive}>
               {FRAME_SIZES.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
             </select>
             {artSettings.frameSizeKey === 'custom' && (
@@ -596,13 +598,13 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>용지 종류</div>
-            <select value={artSettings.paperType} onChange={e => upd('paperType', e.target.value)} disabled={isRunning}>
+            <select value={artSettings.paperType} onChange={e => upd('paperType', e.target.value)} disabled={isActive}>
               {PAPER_TYPES.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
           <div>
             <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>픽셀 해상도</div>
-            <select value={artSettings.resolutionKey} onChange={e => setRes(e.target.value)} disabled={isRunning}>
+            <select value={artSettings.resolutionKey} onChange={e => setRes(e.target.value)} disabled={isActive}>
               {RESOLUTIONS.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
             </select>
             {artSettings.resolutionKey === 'custom' && (
@@ -654,12 +656,23 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
           )}
         </div>
 
-        {(isRunning || isFinished) && (
+        {(isActive || isFinished) && (
           <div style={{ marginBottom: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
-              <span style={{ color: DRAWING_STATUS_COLOR[drawingState.status], fontWeight: 700 }}>
-                {DRAWING_STATUS_LABEL[drawingState.status]}
-                {isRunning && ` — ${drawingState.currentPixel.toLocaleString()} / ${drawingState.totalPixels.toLocaleString()} 픽셀`}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginBottom: 5 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: DRAWING_STATUS_COLOR[drawingState.status], fontWeight: 700 }}>
+                  {DRAWING_STATUS_LABEL[drawingState.status]}
+                  {isActive && drawingState.currentStep && ` — ${drawingState.currentStep}`}
+                  {isRunning && !drawingState.currentStep && ` — ${drawingState.currentPixel.toLocaleString()} / ${drawingState.totalPixels.toLocaleString()} 픽셀`}
+                </span>
+                {isActive && (
+                  <span style={{
+                    display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+                    background: isPaused ? 'var(--yellow)' : 'var(--accent)',
+                    animation: 'pulse 1s ease-in-out infinite',
+                    flexShrink: 0,
+                  }} />
+                )}
               </span>
               <span style={{ color: 'var(--text2)' }}>{progress}%</span>
             </div>
@@ -687,12 +700,12 @@ export default function CustomerScreen({ drawingState, onStartDrawing, onCancelD
         <div style={{ display: 'flex', gap: 12 }}>
           <button className="btn-primary"
             style={{ flex: 2, padding: '13px', fontSize: 16, fontWeight: 800, letterSpacing: 1 }}
-            disabled={isRunning}
+            disabled={isActive}
             onClick={() => {
               if (!imageFile || pixelData.length === 0) return;
               onStartDrawing(pixelData, artSettings, imageFile?.name ?? 'image');
             }}>
-            {isRunning ? '그리는 중...' : '▶ 그리기 시작'}
+            {isRunning ? '그리는 중...' : isPaused ? '일시정지 중...' : '▶ 그리기 시작'}
           </button>
         </div>
       </div>

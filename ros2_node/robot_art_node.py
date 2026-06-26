@@ -88,6 +88,12 @@ class RobotArtNode(Node):
         self.create_service(Trigger, '/robot_art/calibrate_z',    self._svc_calibrate_z)
         self.create_service(Trigger, '/robot_art/frame_task',     self._svc_frame_task)
         self.create_service(Trigger, '/robot_art/confirm_retry',  self._svc_confirm_retry)
+        self.create_service(Trigger, '/robot_art/paper_check',         self._svc_paper_check)
+        self.create_service(Trigger, '/robot_art/frame_lower',         self._svc_frame_lower)
+        self.create_service(Trigger, '/robot_art/frame_paper_pickup', self._svc_frame_paper_pickup)
+        self.create_service(Trigger, '/robot_art/frame_align',        self._svc_frame_align)
+        self.create_service(Trigger, '/robot_art/frame_upper',        self._svc_frame_upper)
+        self.create_service(Trigger, '/robot_art/frame_eject',        self._svc_frame_eject)
 
         # ── 상태 주기 발행 ──────────────────────────────────────
         self.create_timer(STATUS_INTERVAL_SEC, self._pub_status)
@@ -171,6 +177,11 @@ class RobotArtNode(Node):
     def _run_op(self, fn, *args):
         """개별 동작을 별도 스레드로 실행하고 robot status를 running/idle로 관리."""
         def _target():
+            # 이전 강제정지/E-STOP으로 인한 abort/estop 플래그 초기화
+            self.robot._abort = False
+            self.robot._motion_pause_evt.set()
+            with self.robot._lock:
+                self.robot.state.estop = False
             self.robot.set_status("running")
             try:
                 fn(*args)
@@ -225,6 +236,45 @@ class RobotArtNode(Node):
         res.message = '액자 작업 시작'
         return res
 
+    def _svc_paper_check(self, req, res):
+        if self.engine.is_running():
+            res.success = False; res.message = '그리기 중 불가'; return res
+        def _check():
+            result = self.robot.check_paper()
+            self._pub_log(f"종이 {'있음' if result else '없음'}", "INFO")
+        self._run_op(_check)
+        res.success = True; res.message = '종이 확인 시작'; return res
+
+    def _svc_frame_lower(self, req, res):
+        if self.engine.is_running():
+            res.success = False; res.message = '그리기 중 불가'; return res
+        self._run_op(self.robot.frame_lower_plate)
+        res.success = True; res.message = '액자 하판 시작'; return res
+
+    def _svc_frame_paper_pickup(self, req, res):
+        if self.engine.is_running():
+            res.success = False; res.message = '그리기 중 불가'; return res
+        self._run_op(self.robot.frame_paper_pickup)
+        res.success = True; res.message = '종이 픽업 시작'; return res
+
+    def _svc_frame_align(self, req, res):
+        if self.engine.is_running():
+            res.success = False; res.message = '그리기 중 불가'; return res
+        self._run_op(self.robot.frame_align)
+        res.success = True; res.message = '정렬 시작'; return res
+
+    def _svc_frame_upper(self, req, res):
+        if self.engine.is_running():
+            res.success = False; res.message = '그리기 중 불가'; return res
+        self._run_op(self.robot.frame_upper_plate)
+        res.success = True; res.message = '액자 상판 시작'; return res
+
+    def _svc_frame_eject(self, req, res):
+        if self.engine.is_running():
+            res.success = False; res.message = '그리기 중 불가'; return res
+        self._run_op(self.robot.frame_eject)
+        res.success = True; res.message = '액자 배출 시작'; return res
+
     def _svc_confirm_retry(self, req, res):
         self.robot.confirm()
         res.success = True
@@ -252,6 +302,7 @@ class RobotArtNode(Node):
             'type'           : 'status',
             'robot'          : self.robot.get_state(),
             'drawStatus'     : self.engine.status,
+            'currentStep'    : self.engine.current_step,
             'currentPixel'   : self.engine.current_pixel,
             'totalPixels'    : self.engine.total_pixels,
             'currentPenForce': self.engine.current_pen_force,
@@ -278,13 +329,11 @@ def main():
     executor = MultiThreadedExecutor()
     executor.add_node(node)
     try:
-        while rclpy.ok():
-            try:
-                executor.spin_once(timeout_sec=1.0)
-            except KeyboardInterrupt:
-                break
-            except Exception as e:
-                log.error(f"executor spin 오류 (계속 실행): {e}")
+        executor.spin()
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        log.error(f"executor 비정상 종료: {e}")
     finally:
         node.destroy_node()
         rclpy.shutdown()

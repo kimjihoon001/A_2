@@ -88,6 +88,7 @@ class DrawingEngine:
         self.robot    = robot
         self.db       = db
         self.robot.on_confirm_request = self._on_robot_confirm_request
+        self.robot.on_step_change     = self._on_robot_step_change
         self._thread  : threading.Thread | None = None
         self._stop_evt: threading.Event = threading.Event()
         self._pause_evt: threading.Event = threading.Event()
@@ -95,6 +96,7 @@ class DrawingEngine:
 
         # 진행 상태 (메인 스레드에서 읽힘)
         self.status          = "idle"
+        self.current_step    = ""
         self.current_pixel   = 0
         self.total_pixels    = 0
         self.current_pen_force = 0.0
@@ -110,6 +112,11 @@ class DrawingEngine:
         if self.on_progress:
             self.on_progress({"type": "confirm_request", "message": message})
 
+    def _on_robot_step_change(self, step: str):
+        self.current_step = step
+        self.message = step
+        self._emit_progress()
+
     def _emit_log(self, msg: str, level: str = "INFO"):
         log.info(f"[{level}] {msg}")
         self.db.add_log(msg, level, self.job_id)
@@ -121,6 +128,7 @@ class DrawingEngine:
             self.on_progress({
                 "type"          : "draw_progress",
                 "drawStatus"    : self.status,
+                "currentStep"   : self.current_step,
                 "currentPixel"  : self.current_pixel,
                 "totalPixels"   : self.total_pixels,
                 "currentPenForce": round(self.current_pen_force, 2),
@@ -133,6 +141,7 @@ class DrawingEngine:
             raise RuntimeError("이미 그리기 작업이 진행 중입니다.")
 
         self._stop_evt.clear()
+        self.current_step = ""
         self.robot._abort = False
         self.robot._motion_pause_evt.set()
 
@@ -208,6 +217,7 @@ class DrawingEngine:
         else:
             try:
                 # 펜 잡기 전 종이 확인
+                self.current_step = "종이확인"
                 self._emit_log("종이 확인 중...")
                 while not self.robot.check_paper():
                     if self.robot._check_abort():
@@ -223,6 +233,7 @@ class DrawingEngine:
                     self._finish("cancelled", 0)
                     return
 
+                self.current_step = "연필파지"
                 self._emit_log("연필 파지 중...")
                 self.robot.pencil_grip()
                 self._emit_log("연필 파지 완료")
@@ -233,6 +244,7 @@ class DrawingEngine:
 
                 if path:
                     first = path[0]
+                    self.current_step = "그리기준비"
                     self._emit_log("첫 픽셀 위치로 이동 후 Z 자동 측정...")
                     travel_z = float(calib.get("travel_z") or (first["z_up"] + 10.0))
                     self.robot.move_to_xy(first["rx"], first["ry"], travel_z)
@@ -266,6 +278,7 @@ class DrawingEngine:
                 self._finish("failed", 0)
                 return
 
+        self.current_step = "그리기"
         try:
             for i, step in enumerate(path):
                 # 중단 요청 확인 (강제정지 또는 E-STOP)
@@ -310,16 +323,14 @@ class DrawingEngine:
             self._finish("failed", self.current_pixel)
 
     def _finish(self, final_status: str, completed: int):
-        duration = time.time() - self._start_time
-        self.status  = final_status
-        self.message = {
-            "success"  : f"완료! {completed:,}픽셀 인쇄 성공 ({duration:.1f}s)",
-            "failed"   : f"실패: {completed:,}픽셀 완료 후 오류 발생",
-            "cancelled": f"취소됨: {completed:,}픽셀 완료",
-        }.get(final_status, "완료")
+        draw_duration = time.time() - self._start_time
+        self.db.finish_job(self.job_id, final_status, completed, draw_duration)
 
-        self.db.finish_job(self.job_id, final_status, completed, duration)
+        # ── 연필 반납 (status는 아직 'running' 유지 → pause 가능) ──
         if not self.robot._abort:
+            self.current_step = "연필반납"
+            self.message = "연필 반납 중..."
+            self._emit_progress()
             try:
                 self._emit_log("연필 반납 중...")
                 self.robot.pencil_release()
@@ -329,15 +340,24 @@ class DrawingEngine:
         else:
             self._emit_log("강제정지 — 연필 반납 생략")
 
+        # ── 액자 조립 (성공 시만) ──────────────────────────────────
         if final_status == "success":
             try:
                 self._emit_log("액자 조립 시작...")
                 self.robot.set_status("running")
-                self.robot.frame_assembly()
+                self.robot.frame_assembly()  # on_step_change로 current_step 자동 갱신
                 self._emit_log("액자 조립 완료")
             except Exception as e:
                 self._emit_log(f"액자 조립 오류: {e}", "ERROR")
 
+        # ── 최종 상태 전환 ────────────────────────────────────────
+        self.status = final_status
+        self.current_step = ""
+        self.message = {
+            "success"  : f"완료! {completed:,}픽셀 ({draw_duration:.1f}s)",
+            "failed"   : f"실패: {completed:,}픽셀",
+            "cancelled": f"취소됨: {completed:,}픽셀",
+        }.get(final_status, "완료")
         self.robot.set_status("idle")
-        self._emit_log(f"작업 {final_status}: {completed:,}픽셀 / {duration:.1f}s")
+        self._emit_log(f"작업 {final_status}: {completed:,}픽셀 / {draw_duration:.1f}s")
         self._emit_progress()

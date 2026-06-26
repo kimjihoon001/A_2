@@ -40,7 +40,7 @@ export const STATUS_COLOR: Record<string, string> = {
 
 export const NAV_ITEMS = [
   { id: 'dashboard',   label: '대시보드',    icon: '📊' },
-  { id: 'drawing',     label: '그림 제어',   icon: '🎨' },
+  { id: 'drawing',     label: '로봇 제어',   icon: '🤖' },
   { id: 'calibration', label: '캘리브레이션', icon: '📐' },
   { id: 'safety',      label: '안전관리',    icon: '🛡️' },
   { id: 'connection',  label: '연결관리',    icon: '🔌' },
@@ -91,6 +91,7 @@ export const DEFAULT_ART_SETTINGS: ArtSettings = {
 
 export const INITIAL_DRAWING_STATE: DrawingState = {
   status:          'idle',
+  currentStep:     '',
   currentPixel:    0,
   totalPixels:     0,
   resWidth:        100,

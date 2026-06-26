@@ -105,6 +105,7 @@ export default function App() {
         const next: DrawingState = {
           ...prev,
           status:          data.drawStatus as DrawingState['status'],
+          currentStep:     data.currentStep ?? '',
           currentPixel:    data.currentPixel,
           totalPixels:     data.totalPixels > 0 ? data.totalPixels : prev.totalPixels,
           currentPenForce: data.currentPenForce,
@@ -288,11 +289,14 @@ export default function App() {
         onPause={handlePause}
         onResume={handleResume}
         onGoHome={handleGoHome}
+        onPaperCheck={() => { if (serverConnected) server.paperCheck(); addLog('[관리자] 종이 확인 시작'); }}
         onPencilGrip={() => { if (serverConnected) server.pencilGrip(); addLog('[관리자] 연필 파지 시작'); }}
         onPencilRelease={() => { if (serverConnected) server.pencilRelease(); addLog('[관리자] 연필 반납 시작'); }}
-        onGripperOpen={() => { if (serverConnected) server.gripperOpen(); addLog('[관리자] 그리퍼 열기'); }}
-        onGripperClose={() => { if (serverConnected) server.gripperClose(); addLog('[관리자] 그리퍼 닫기'); }}
-        onFrameTask={() => { if (serverConnected) server.frameTask(); addLog('[관리자] 액자 작업 시작'); }}
+        onFrameLower={() => { if (serverConnected) server.frameLower(); addLog('[관리자] 액자 하판 시작'); }}
+        onFramePaperPickup={() => { if (serverConnected) server.framePaperPickup(); addLog('[관리자] 종이 픽업 시작'); }}
+        onFrameAlign={() => { if (serverConnected) server.frameAlign(); addLog('[관리자] 정렬 시작'); }}
+        onFrameUpper={() => { if (serverConnected) server.frameUpper(); addLog('[관리자] 액자 상판 시작'); }}
+        onFrameEject={() => { if (serverConnected) server.frameEject(); addLog('[관리자] 액자 배출 시작'); }}
         addLog={addLog}
       />
     ),

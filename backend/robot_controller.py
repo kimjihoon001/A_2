@@ -271,6 +271,7 @@ class RobotController:
         self.robot_ip, self.robot_port = _read_dsr_robot_params()
         self._confirm_evt: threading.Event = threading.Event()
         self.on_confirm_request = None  # (message: str) -> None
+        self.on_step_change = None      # (step: str) -> None
         self._abort = False
         self._motion_pause_evt = threading.Event()
         self._motion_pause_evt.set()  # set=실행, clear=일시정지
@@ -1104,33 +1105,31 @@ class RobotController:
         movel(pos_up,   vel=[100, 100], acc=[50, 50], mod=0)
         log.info("연필 반납 완료")
 
-    def frame_assembly(self):
-        """그리기 완료 후 액자 조립 전체 시퀀스 (T4_robottask 좌표 그대로)"""
-        if not _dsr_available:
-            log.info("[시뮬] frame_assembly")
-            return
+    def _dsr(self):
+        """공통 DSR 함수 묶음 반환"""
+        return (
+            _dsr_funcs['movel'], _dsr_funcs['movej'], _dsr_funcs['amovel'],
+            _dsr_funcs['posx'],  _dsr_funcs['posj'],
+            _dsr_funcs['task_compliance_ctrl'], _dsr_funcs['set_desired_force'],
+            _dsr_funcs['release_force'], _dsr_funcs['release_compliance_ctrl'],
+            _dsr_funcs['get_current_posx'],
+            _dsr_funcs['DR_FC_MOD_REL'], _dsr_funcs['DR_BASE'],
+        )
 
-        movel  = _dsr_funcs['movel']
-        movej  = _dsr_funcs['movej']
-        amovel = _dsr_funcs['amovel']
-        posx   = _dsr_funcs['posx']
-        posj   = _dsr_funcs['posj']
-        task_compliance_ctrl    = _dsr_funcs['task_compliance_ctrl']
-        set_desired_force       = _dsr_funcs['set_desired_force']
-        release_force           = _dsr_funcs['release_force']
-        release_compliance_ctrl = _dsr_funcs['release_compliance_ctrl']
-        get_current_posx        = _dsr_funcs['get_current_posx']
-        DR_FC_MOD_REL           = _dsr_funcs['DR_FC_MOD_REL']
-        DR_BASE                 = _dsr_funcs['DR_BASE']
+    def _chk(self, label: str = '') -> bool:
+        if self._check_abort():
+            log.warning(f"abort/E-STOP — {label} 중단")
+            return False
+        self._wait_if_paused()
+        return True
 
-        def _chk():
-            if self._check_abort():
-                log.warning("abort/E-STOP — frame_assembly 중단")
-                return False
-            self._wait_if_paused()
-            return True
+    # ── 액자 서브스텝 개별 메서드 ─────────────────────────────────
 
-        # ── 1. 액자 하판 배치 ────────────────────────────────────
+    def frame_lower_plate(self):
+        """액자 하판 개별 배치"""
+        if not _dsr_available: log.info("[시뮬] frame_lower_plate"); return
+        movel, movej, amovel, posx, posj, tcc, sdf, rf, rcc, gcpx, FC_REL, BASE = self._dsr()
+        if self.on_step_change: self.on_step_change("액자하판")
         log.info("액자 하판 배치 시작")
         home_pos = posj(-0.01, 0.01, 90.00, 180.02, -89.98, 0)
         pos_lowframe_start_hover  = posj(-17.09, -4.66, 71.34, 179.97, -113.32, 72.06)
@@ -1140,42 +1139,40 @@ class RobotController:
         pos_frame_lower2 = posx(269.77, 295.96,  74.64, 90.91, -89.97, -0.03)
         pos_frame_lower3 = posx(269.77, 345.96,  74.64, 90.91, -89.97, -0.03)
         pos_frame_lower4 = posx(269.77, 345.96, 174.64, 90.91, -89.97, -0.03)
-
         self.gripper_open()
-        if not _chk(): return
+        if not self._chk("액자하판"): return
         movej(home_pos, vel=30, acc=50)
-
         while not self.state.estop:
-            if not _chk(): return
+            if not self._chk("액자하판"): return
             movej(pos_lowframe_start_hover, vel=100, acc=50)
-            if not _chk(): return
+            if not self._chk("액자하판"): return
             movel(pos_lowframe_start, vel=[100, 100], acc=[50, 50])
-            self.gripper_close()
-            time.sleep(0.5)
+            self.gripper_close(); time.sleep(0.5)
             w = _gripper_read_width()
             if w is not None and w < 15.0:
-                log.error(f"액자 하판 파지 실패 (폭={w}mm) — 확인 대기")
+                log.error(f"액자 하판 파지 실패 (폭={w}mm)")
                 self.gripper_open()
                 movej(pos_lowframe_start_hover, vel=30, acc=50)
-                if not self.wait_for_confirm("액자 하판을 보관함에 넣고 확인을 눌러주세요"):
-                    return
+                if not self.wait_for_confirm("액자 하판을 보관함에 넣고 확인을 눌러주세요"): return
                 continue
-            log.info(f"액자 하판 파지 완료 (폭={w}mm)")
-            if not _chk(): return
+            if not self._chk("액자하판"): return
             movel(pos_lowframe_start_hoverx, vel=[100, 100], acc=[50, 50])
-            if not _chk(): return
+            if not self._chk("액자하판"): return
             movej(pos_frame_lower1, vel=100, acc=50)
-            if not _chk(): return
+            if not self._chk("액자하판"): return
             movel(pos_frame_lower2, vel=[100, 100], acc=[30, 30], mod=0)
-            self.gripper_open()
-            time.sleep(0.5)
+            self.gripper_open(); time.sleep(0.5)
             movel(pos_frame_lower3, vel=[100, 100], acc=[50, 50], mod=0)
             movel(pos_frame_lower4, vel=[100, 100], acc=[50, 50], mod=0)
-            if not _chk(): return
+            if not self._chk("액자하판"): return
             movej(home_pos, vel=100, acc=50)
             break
 
-        # ── 2. 종이 슬라이딩 & 픽업 ─────────────────────────────
+    def frame_paper_pickup(self):
+        """종이 슬라이딩 & 픽업"""
+        if not _dsr_available: log.info("[시뮬] frame_paper_pickup"); return
+        movel, movej, amovel, posx, posj, tcc, sdf, rf, rcc, gcpx, FC_REL, BASE = self._dsr()
+        if self.on_step_change: self.on_step_change("종이픽업")
         log.info("종이 픽업 시작")
         pos_paper_center       = posx(563.03,  75.97, 328.62,   9.86, 180.00,  98.32)
         pos_cliff_edge         = posx(563.03, 120.97, 328.63, 179.99, 180.00, -91.36)
@@ -1188,158 +1185,156 @@ class RobotController:
                          pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
         ready_pos = posx(pos_paper_center[0], pos_paper_center[1], pos_paper_center[2]+2,
                          pos_paper_center[3], pos_paper_center[4], pos_paper_center[5])
-
         while not self.state.estop:
-            if not _chk(): return
+            if not self._chk("종이픽업"): return
             movel(hover_pos, vel=[100, 100], acc=[50, 50], mod=0)
             self.gripper_close()
-            if not _chk(): return
+            if not self._chk("종이픽업"): return
             movel(ready_pos, vel=30, acc=50, mod=0)
-            task_compliance_ctrl(stx=[500, 500, 500, 100, 100, 100])
-            time.sleep(0.5)
-            set_desired_force(fd=[0, 0, -2, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
-            time.sleep(2)
-            current_pos, _ = get_current_posx(ref=DR_BASE)
+            tcc(stx=[500, 500, 500, 100, 100, 100]); time.sleep(0.5)
+            sdf(fd=[0, 0, -2, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=FC_REL); time.sleep(2)
+            current_pos, _ = gcpx(ref=BASE)
             if current_pos[2] < 324.0:
                 log.error(f"종이 없음 (Z={current_pos[2]:.1f}mm)")
-                release_force()
-                time.sleep(0.1)
-                release_compliance_ctrl()
+                rf(); time.sleep(0.1); rcc()
                 movel(hover_pos, vel=50, acc=50, mod=0)
-                if not self.wait_for_confirm("종이를 보관함에 넣고 확인을 눌러주세요"):
-                    return
+                if not self.wait_for_confirm("종이를 보관함에 넣고 확인을 눌러주세요"): return
                 continue
             break
-
-        if not _chk(): return
+        if not self._chk("종이픽업"): return
         move_pos = posx(pos_cliff_edge[0], pos_cliff_edge[1], pos_cliff_edge[2],
                         pos_cliff_edge[3], pos_cliff_edge[4], pos_cliff_edge[5])
-        amovel(move_pos, vel=30, acc=50, mod=0, ref=0)
-        time.sleep(3)
-        release_force()
-        time.sleep(0.5)
-        release_compliance_ctrl()
+        amovel(move_pos, vel=30, acc=50, mod=0, ref=0); time.sleep(3)
+        rf(); time.sleep(0.5); rcc()
         movel(posx(pos_cliff_edge[0], pos_cliff_edge[1], pos_cliff_edge[2]+100,
                    pos_cliff_edge[3], pos_cliff_edge[4], pos_cliff_edge[5]), vel=100, acc=100)
         self.gripper_open()
-        if not _chk(): return
+        if not self._chk("종이픽업"): return
         movel(pinch_ready_pos0, vel=[100, 100], acc=[50, 50])
         movel(pinch_ready_pos1, vel=[100, 100], acc=[50, 50])
         movel(pinch_ready_pos2, vel=[50, 50],   acc=[50, 50])
         self.gripper_close()
         movel(pinch_ready_pos0, vel=[100, 100], acc=[50, 50])
-        if not _chk(): return
+        if not self._chk("종이픽업"): return
         movel(pos_frame_paper_prepare, vel=[100, 100], acc=[50, 50])
         movel(pos_frame_paper0,        vel=[100, 100], acc=[50, 50])
-        self.gripper_open()
-        time.sleep(2)
+        self.gripper_open(); time.sleep(2)
         pos_paper_release0 = posx(0, 0, 0, 90, -40, -90)
-        amovel(pos_paper_release0, vel=[20.0, 20.0], acc=[10.0, 10.0], mod=1, ref=0)
-        time.sleep(3)
+        amovel(pos_paper_release0, vel=[20.0, 20.0], acc=[10.0, 10.0], mod=1, ref=0); time.sleep(3)
         log.info("종이 픽업 완료")
 
-        # ── 3. 캘리브레이션 (공통 — 2회 호출) ──────────────────
-        def _calibration_frame():
-            pos_paper_caly0 = posx(286.07, 158.74, 340.07, 68.05, 179.95, 159.14)
-            pos_paper_caly1 = posx(286.07, 158.74, 290.07, 68.05, 179.95, 159.14)
-            pos_paper_caly2 = posx(286.07, 101.20, 290.07, 68.05, 179.95, 159.14)
-            pos_paper_calx0 = posx(136.30,   3.09, 341.14, 48.36, 179.93, -41.67)
-            pos_paper_calx1 = posx(136.30,   3.09, 291.14, 48.36, 179.93, -41.67)
-            pos_paper_calx2 = posx(166.30,   3.09, 291.14, 48.36, 179.93, -41.67)
+    def frame_align(self):
+        """종이 정렬 캘리브레이션 (Y→X 방향 밀기)"""
+        if not _dsr_available: log.info("[시뮬] frame_align"); return
+        movel, movej, amovel, posx, posj, tcc, sdf, rf, rcc, gcpx, FC_REL, BASE = self._dsr()
+        pos_paper_caly0 = posx(286.07, 158.74, 340.07, 68.05, 179.95, 159.14)
+        pos_paper_caly1 = posx(286.07, 158.74, 290.07, 68.05, 179.95, 159.14)
+        pos_paper_caly2 = posx(286.07, 101.20, 290.07, 68.05, 179.95, 159.14)
+        pos_paper_calx0 = posx(136.30,   3.09, 341.14, 48.36, 179.93, -41.67)
+        pos_paper_calx1 = posx(136.30,   3.09, 291.14, 48.36, 179.93, -41.67)
+        pos_paper_calx2 = posx(166.30,   3.09, 291.14, 48.36, 179.93, -41.67)
+        if not self._chk("정렬"): return
+        self.gripper_close()
+        movel(pos_paper_caly0, vel=100, acc=50)
+        movel(pos_paper_caly1, vel=100, acc=50)
+        tcc(stx=[100, 3000, 3000, 100, 100, 100]); time.sleep(0.5)
+        amovel(pos_paper_caly2, vel=[30, 30], acc=[30, 30], ref=0, mod=0); time.sleep(3)
+        rcc()
+        movel(pos_paper_caly1, vel=100, acc=50)
+        movel(pos_paper_caly0, vel=100, acc=50)
+        if not self._chk("정렬"): return
+        movel(pos_paper_calx0, vel=100, acc=50)
+        movel(pos_paper_calx1, vel=100, acc=50)
+        tcc(stx=[100, 3000, 3000, 100, 100, 100]); time.sleep(0.5)
+        amovel(pos_paper_calx2, vel=[30, 30], acc=[30, 30], ref=0, mod=0); time.sleep(3)
+        rf(); time.sleep(0.5); rcc()
+        movel(pos_paper_calx1, vel=100, acc=50)
+        movel(pos_paper_calx0, vel=100, acc=50)
+        log.info("정렬 완료")
 
-            if not _chk(): return
-            self.gripper_close()
-            movel(pos_paper_caly0, vel=100, acc=50)
-            movel(pos_paper_caly1, vel=100, acc=50)
-            task_compliance_ctrl(stx=[100, 3000, 3000, 100, 100, 100])
-            time.sleep(0.5)
-            amovel(pos_paper_caly2, vel=[30, 30], acc=[30, 30], ref=0, mod=0)
-            time.sleep(3)
-            release_compliance_ctrl()
-            movel(pos_paper_caly1, vel=100, acc=50)
-            movel(pos_paper_caly0, vel=100, acc=50)
-            if not _chk(): return
-            movel(pos_paper_calx0, vel=100, acc=50)
-            movel(pos_paper_calx1, vel=100, acc=50)
-            task_compliance_ctrl(stx=[100, 3000, 3000, 100, 100, 100])
-            time.sleep(0.5)
-            amovel(pos_paper_calx2, vel=[30, 30], acc=[30, 30], ref=0, mod=0)
-            time.sleep(3)
-            release_force()
-            time.sleep(0.5)
-            release_compliance_ctrl()
-            movel(pos_paper_calx1, vel=100, acc=50)
-            movel(pos_paper_calx0, vel=100, acc=50)
-            log.info("캘리브레이션 완료")
-
-        log.info("캘리브레이션 1차")
-        _calibration_frame()
-
-        # ── 4. 액자 상판 배치 ────────────────────────────────────
+    def frame_upper_plate(self):
+        """액자 상판 배치"""
+        if not _dsr_available: log.info("[시뮬] frame_upper_plate"); return
+        movel, movej, amovel, posx, posj, tcc, sdf, rf, rcc, gcpx, FC_REL, BASE = self._dsr()
+        if self.on_step_change: self.on_step_change("액자상판")
         log.info("액자 상판 배치 시작")
-        pos_frame_highstart_hover  = posx(295.35, -127.08, 583.96, 70.24, 179.95, -19.80)
-        pos_frame_highstart        = posx(295.36, -127.08, 347.73, 67.75, 179.95, -22.29)
+        pos_frame_highstart_hover = posx(295.35, -127.08, 583.96, 70.24, 179.95, -19.80)
+        pos_frame_highstart       = posx(295.36, -127.08, 347.73, 67.75, 179.95, -22.29)
         pos_frame_high1 = posx(274.49, 328.02, 231.75, 90.06, -90.00, 0.00)
         pos_frame_high2 = posx(274.49, 328.02,  81.75, 90.06, -90.00, 0.00)
         pos_frame_high3 = posx(274.49, 378.02,  81.75, 90.06, -90.00, 0.00)
         pos_frame_high4 = posx(274.49, 378.02, 181.75, 90.06, -90.00, 0.00)
         home_pos2 = posj(-0.01, 0.01, 90.00, 180.02, -89.98, 0)
-
         while not self.state.estop:
             self.gripper_open()
-            if not _chk(): return
+            if not self._chk("액자상판"): return
             movel(pos_frame_highstart_hover, vel=100, acc=50)
-            if not _chk(): return
+            if not self._chk("액자상판"): return
             movel(pos_frame_highstart, vel=[100, 100], acc=[50, 50])
-            self.gripper_close()
-            time.sleep(0.5)
+            self.gripper_close(); time.sleep(0.5)
             w = _gripper_read_width()
             if w is not None and w < 15.0:
-                log.error(f"액자 상판 파지 실패 (폭={w}mm) — 확인 대기")
+                log.error(f"액자 상판 파지 실패 (폭={w}mm)")
                 self.gripper_open()
                 movel(pos_frame_highstart_hover, vel=30, acc=50)
-                if not self.wait_for_confirm("액자 상판을 보관함에 넣고 확인을 눌러주세요"):
-                    return
+                if not self.wait_for_confirm("액자 상판을 보관함에 넣고 확인을 눌러주세요"): return
                 continue
-            log.info(f"액자 상판 파지 완료 (폭={w}mm)")
-            if not _chk(): return
+            if not self._chk("액자상판"): return
             movel(pos_frame_highstart_hover, vel=[100, 100], acc=[50, 50])
             movel(pos_frame_high1,           vel=[100, 100], acc=[50, 50])
             movel(pos_frame_high2,           vel=[100, 100], acc=[50, 50], mod=0)
-            self.gripper_open()
-            time.sleep(0.5)
+            self.gripper_open(); time.sleep(0.5)
             movel(pos_frame_high3, vel=[100, 100], acc=[50, 50], mod=0)
             movel(pos_frame_high4, vel=[100, 100], acc=[50, 50], mod=0)
-            if not _chk(): return
+            if not self._chk("액자상판"): return
             movej(home_pos2, vel=70, acc=50)
             break
 
-        # ── 5. 캘리브레이션 2차 ──────────────────────────────────
-        log.info("캘리브레이션 2차")
-        _calibration_frame()
-
-        # ── 6. 액자 배출 ─────────────────────────────────────────
+    def frame_eject(self):
+        """액자 배출"""
+        if not _dsr_available: log.info("[시뮬] frame_eject"); return
+        movel, movej, amovel, posx, posj, tcc, sdf, rf, rcc, gcpx, FC_REL, BASE = self._dsr()
+        if self.on_step_change: self.on_step_change("액자배출")
         log.info("액자 배출 시작")
-        pos_frameout0          = posx(281.78, 288.83,  80.12, 90, -90, 0)
-        pos_frameout1          = posx(281.78, 340.83,  80.12, 90, -90, 0)
-        pos_frameout1_hover    = posx(281.78, 340.83, 300.12, 90, -90, 0)
-        pos_framefinal         = posx(420,     51.77, 349.94,  7.48, 179.48, -173.96)
-        pos_framefinal_hover   = posx(420,     51.77, 549.94,  7.48, 179.48, -173.96)
+        pos_frameout0       = posx(281.78, 288.83,  80.12, 90, -90, 0)
+        pos_frameout1       = posx(281.78, 340.83,  80.12, 90, -90, 0)
+        pos_frameout1_hover = posx(281.78, 340.83, 300.12, 90, -90, 0)
+        pos_framefinal      = posx(420,     51.77, 349.94,  7.48, 179.48, -173.96)
+        pos_framefinal_hover= posx(420,     51.77, 549.94,  7.48, 179.48, -173.96)
         home_pos3 = posj(-0.01, 0.01, 90.00, 180.02, -89.98, 0)
-
-        if not _chk(): return
+        if not self._chk("액자배출"): return
         movej(home_pos3, vel=100, acc=50)
         self.gripper_open()
         movel(pos_frameout1_hover, vel=[100, 100], acc=[50, 50])
         movel(pos_frameout1,       vel=[100, 100], acc=[50, 50])
         movel(pos_frameout0,       vel=[100, 100], acc=[50, 50])
         self.gripper_close()
-        if not _chk(): return
+        if not self._chk("액자배출"): return
         movel(pos_frameout1_hover, vel=[100, 100], acc=[50, 50])
         movel(pos_framefinal_hover,vel=[100, 100], acc=[50, 50])
         movel(pos_framefinal,      vel=[100, 100], acc=[50, 50])
         self.gripper_open()
         movel(pos_framefinal_hover,vel=[100, 100], acc=[50, 50])
+        log.info("액자 배출 완료")
+
+    def frame_assembly(self):
+        """액자 조립 전체 시퀀스 (서브스텝 개별 메서드 순차 호출)"""
+        if not _dsr_available:
+            log.info("[시뮬] frame_assembly")
+            return
+        self.frame_lower_plate()
+        if self._check_abort(): return
+        self.frame_paper_pickup()
+        if self._check_abort(): return
+        if self.on_step_change: self.on_step_change("정렬1차")
+        self.frame_align()
+        if self._check_abort(): return
+        self.frame_upper_plate()
+        if self._check_abort(): return
+        if self.on_step_change: self.on_step_change("정렬2차")
+        self.frame_align()
+        if self._check_abort(): return
+        self.frame_eject()
         log.info("액자 조립 전체 완료")
 
     # ── 상태 조회 ────────────────────────────────────────────────

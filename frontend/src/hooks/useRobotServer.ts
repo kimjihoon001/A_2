@@ -42,6 +42,7 @@ interface ServerCallbacks {
 
 interface DrawingProgressMsg {
   drawStatus    : string;
+  currentStep   : string;
   currentPixel  : number;
   totalPixels   : number;
   currentPenForce: number;
@@ -87,6 +88,7 @@ export function useRobotServer(url: string, callbacks: ServerCallbacks = {}) {
             if (msg.drawStatus !== undefined) {
               cbRef.current.onDrawProgress?.({
                 drawStatus    : msg.drawStatus,
+                currentStep   : msg.currentStep   ?? '',
                 currentPixel  : msg.currentPixel  ?? 0,
                 totalPixels   : msg.totalPixels   ?? 0,
                 currentPenForce: msg.currentPenForce ?? 0,
@@ -161,7 +163,13 @@ export function useRobotServer(url: string, callbacks: ServerCallbacks = {}) {
     getSettings   : ()          => send({ cmd: 'get_settings' }),
     saveSettings  : (data: object) => send({ cmd: 'save_settings', data }),
     calibrateZ    : ()          => send({ cmd: 'calibrate_z' }),
-    frameTask     : ()          => send({ cmd: 'frame_task' }),
+    paperCheck       : () => send({ cmd: 'paper_check' }),
+    frameTask        : () => send({ cmd: 'frame_task' }),
+    frameLower       : () => send({ cmd: 'frame_lower' }),
+    framePaperPickup : () => send({ cmd: 'frame_paper_pickup' }),
+    frameAlign       : () => send({ cmd: 'frame_align' }),
+    frameUpper       : () => send({ cmd: 'frame_upper' }),
+    frameEject       : () => send({ cmd: 'frame_eject' }),
     confirmRetry  : ()          => send({ cmd: 'confirm_retry' }),
     // axis: 6=X, 7=Y, 8=Z (task space BASE), speed: % (+ 전진 / 0 정지 / - 후진)
     jogStart      : (axis: number, speed: number) => send({ cmd: 'jog', axis, speed }),

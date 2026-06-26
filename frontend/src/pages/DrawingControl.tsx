@@ -2,6 +2,21 @@ import { useState, useEffect } from 'react';
 import type { DrawingState, RobotState } from '../types';
 import { DRAWING_STATUS_LABEL, DRAWING_STATUS_COLOR } from '../constants';
 
+type StepAction = 'paperCheck' | 'pencilGrip' | 'pencilRelease' | 'frameLower' | 'framePaperPickup' | 'frameAlign' | 'frameUpper' | 'frameEject';
+
+const STEPS: { key: string; action?: StepAction; pausable?: boolean }[] = [
+  { key: '종이확인',  action: 'paperCheck' },
+  { key: '연필파지',  action: 'pencilGrip' },
+  { key: '그리기',    pausable: true },
+  { key: '연필반납',  action: 'pencilRelease' },
+  { key: '액자하판',  action: 'frameLower' },
+  { key: '종이픽업',  action: 'framePaperPickup' },
+  { key: '정렬1차',   action: 'frameAlign' },
+  { key: '액자상판',  action: 'frameUpper' },
+  { key: '정렬2차',   action: 'frameAlign' },
+  { key: '액자배출',  action: 'frameEject' },
+];
+
 interface Props {
   drawingState: DrawingState;
   robotState: RobotState;
@@ -9,17 +24,24 @@ interface Props {
   onPause: () => void;
   onResume: () => void;
   onGoHome: () => void;
+  onPaperCheck: () => void;
   onPencilGrip: () => void;
   onPencilRelease: () => void;
-  onGripperOpen: () => void;
-  onGripperClose: () => void;
-  onFrameTask: () => void;
+  onFrameLower: () => void;
+  onFramePaperPickup: () => void;
+  onFrameAlign: () => void;
+  onFrameUpper: () => void;
+  onFrameEject: () => void;
   addLog: (msg: string) => void;
 }
 
-export default function DrawingControl({ drawingState, robotState, onStop, onPause, onResume, onGoHome, onPencilGrip, onPencilRelease, onGripperOpen, onGripperClose, onFrameTask, addLog }: Props) {
+export default function DrawingControl({
+  drawingState, robotState, onStop, onPause, onResume, onGoHome,
+  onPaperCheck, onPencilGrip, onPencilRelease, onFrameLower, onFramePaperPickup,
+  onFrameAlign, onFrameUpper, onFrameEject, addLog,
+}: Props) {
   const {
-    status, currentPixel, totalPixels, resWidth,
+    status, currentStep, currentPixel, totalPixels, resWidth,
     currentGray, targetForce, currentPenForce,
     message, successCount, failPixels, history,
   } = drawingState;
@@ -29,17 +51,15 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
   const isPaused   = status === 'paused';
   const isActive   = isRunning || isPaused;
 
-  // 개별 동작(연필파지 등) 실행 중 여부 — robotState.status로 감지
-  const isRobotBusy = robotState.status === 'running' && !isActive;
-  // 일시정지 상태 로컬 트래킹 (개별 동작 중 일시정지 반영)
-  const [motionPaused, setMotionPaused] = useState(false);
-  useEffect(() => {
-    if (robotState.status === 'idle' && !isActive) setMotionPaused(false);
-  }, [robotState.status, isActive]);
+  const canPause  = isRunning;
+  const canResume = isPaused;
+  const canStop   = isActive;
 
-  const canPause  = (isRunning || isRobotBusy) && !motionPaused;
-  const canResume = isPaused || motionPaused;
-  const canStop   = isActive || isRobotBusy;
+  // 개별 실행 중인 스텝 추적 (드로잉 엔진 밖)
+  const [runningStep, setRunningStep] = useState<string | null>(null);
+  useEffect(() => {
+    if (robotState.status !== 'running') setRunningStep(null);
+  }, [robotState.status]);
 
   const currentRow = resWidth > 0 ? Math.floor(currentPixel / resWidth) : 0;
   const currentCol = resWidth > 0 ? currentPixel % resWidth : 0;
@@ -52,15 +72,15 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
   const statusLabel = DRAWING_STATUS_LABEL[status];
 
   // 상태에 따른 반짝 애니메이션
-  const pulseStyle = (isRunning || isRobotBusy)
+  const pulseStyle = isRunning
     ? { animation: 'pulse 1s ease-in-out infinite' }
-    : (isPaused || motionPaused)
+    : isPaused
     ? { animation: 'pulse 2s ease-in-out infinite' }
     : {};
 
   return (
     <div>
-      <h2 style={{ marginBottom: 20, fontSize: 20, fontWeight: 700 }}>그림 제어</h2>
+      <h2 style={{ marginBottom: 20, fontSize: 20, fontWeight: 700 }}>로봇 제어</h2>
 
       {/* 상단 상태 + 제어 버튼 */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 16, marginBottom: 20, alignItems: 'start' }}>
@@ -68,10 +88,10 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
           <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>현재 상태</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
             <div style={{ fontSize: 26, fontWeight: 800, color: statusColor }}>{statusLabel}</div>
-            {(isRunning || isRobotBusy || isPaused || motionPaused) && (
+            {(isRunning || isPaused) && (
               <div style={{
                 width: 10, height: 10, borderRadius: '50%',
-                background: (isPaused || motionPaused) ? 'var(--yellow)' : statusColor,
+                background: isPaused ? 'var(--yellow)' : statusColor,
                 ...pulseStyle,
               }} />
             )}
@@ -85,22 +105,12 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
           )}
         </div>
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 160 }}>
-          <button className="btn-outline" disabled={!canPause}
-            style={{ width: '100%' }}
-            onClick={() => { onPause(); setMotionPaused(true); addLog('[관리자] 일시정지'); }}>
-            일시정지
-          </button>
-          <button className="btn-success" disabled={!canResume}
-            style={{ width: '100%' }}
-            onClick={() => { onResume(); setMotionPaused(false); addLog('[관리자] 재개'); }}>
-            재개
-          </button>
           <button className="btn-danger" disabled={!canStop}
             style={{ width: '100%' }}
-            onClick={() => { onStop(); setMotionPaused(false); addLog('[관리자] 강제 정지'); }}>
+            onClick={() => { onStop(); addLog('[관리자] 강제 정지'); }}>
             강제정지
           </button>
-          <button className="btn-ghost" disabled={isActive || isRobotBusy}
+          <button className="btn-ghost" disabled={isActive}
             style={{ width: '100%' }}
             onClick={() => { onGoHome(); addLog('[관리자] 원점 복귀'); }}>
             원점복귀
@@ -108,30 +118,69 @@ export default function DrawingControl({ drawingState, robotState, onStop, onPau
         </div>
       </div>
 
-      {/* 로봇 개별 동작 제어 */}
+      {/* 단계별 박스 그리드 */}
       <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-title">로봇 개별 동작</div>
+        <div className="card-title">동작 단계</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
-          <button className="btn-outline" disabled={isActive || isRobotBusy}
-            onClick={() => { onPencilGrip(); addLog('[관리자] 연필 파지'); }}>
-            연필 파지
-          </button>
-          <button className="btn-outline" disabled={isActive || isRobotBusy}
-            onClick={() => { onPencilRelease(); addLog('[관리자] 연필 반납'); }}>
-            연필 반납
-          </button>
-          <button className="btn-outline" disabled={isActive || isRobotBusy}
-            onClick={() => { onGripperOpen(); addLog('[관리자] 그리퍼 열기'); }}>
-            그리퍼 열기
-          </button>
-          <button className="btn-outline" disabled={isActive || isRobotBusy}
-            onClick={() => { onGripperClose(); addLog('[관리자] 그리퍼 닫기'); }}>
-            그리퍼 닫기
-          </button>
-          <button className="btn-outline" disabled={isActive || isRobotBusy}
-            onClick={() => { onFrameTask(); addLog('[관리자] 액자 작업 시작'); }}>
-            액자 작업
-          </button>
+          {STEPS.map(({ key: step, action }) => {
+            const engineActive  = step === currentStep;
+            const indivActive   = step === runningStep;
+            const active        = engineActive || indivActive;
+            const blinking      = (engineActive && !isPaused) || indivActive;
+            const color         = active
+              ? (isPaused && engineActive ? 'var(--yellow)' : 'var(--accent)')
+              : 'var(--border)';
+            const runFn: (() => void) | null =
+                action === 'paperCheck'        ? onPaperCheck
+              : action === 'pencilGrip'        ? onPencilGrip
+              : action === 'pencilRelease'     ? onPencilRelease
+              : action === 'frameLower'        ? onFrameLower
+              : action === 'framePaperPickup'  ? onFramePaperPickup
+              : action === 'frameAlign'        ? onFrameAlign
+              : action === 'frameUpper'        ? onFrameUpper
+              : action === 'frameEject'        ? onFrameEject
+              : null;
+            return (
+              <div key={step} style={{
+                padding: '14px 8px 10px',
+                borderRadius: 10,
+                border: `2px solid ${color}`,
+                background: active ? 'var(--panel2)' : 'var(--panel)',
+                textAlign: 'center',
+                transition: 'border-color 0.2s, background 0.2s',
+                ...(blinking ? { animation: 'pulse 1s ease-in-out infinite' } : {}),
+              }}>
+                <div style={{
+                  fontSize: 12, fontWeight: active ? 700 : 400,
+                  color: active ? 'var(--text)' : 'var(--text2)',
+                  marginBottom: 8,
+                }}>{step}</div>
+                <div style={{ display: 'flex', gap: 3, justifyContent: 'center', marginBottom: runFn ? 4 : 0 }}>
+                  <button className="btn-outline" disabled={!engineActive || !canPause}
+                    style={{ flex: 1, padding: '3px 0', fontSize: 10 }}
+                    onClick={() => { onPause(); addLog(`[관리자] ${step} 일시정지`); }}>
+                    일시정지
+                  </button>
+                  <button className="btn-success" disabled={!engineActive || !canResume}
+                    style={{ flex: 1, padding: '3px 0', fontSize: 10 }}
+                    onClick={() => { onResume(); addLog(`[관리자] ${step} 재개`); }}>
+                    재개
+                  </button>
+                </div>
+                {runFn && (
+                  <button className="btn-outline" disabled={isActive || !!runningStep}
+                    style={{ width: '100%', padding: '3px 0', fontSize: 10 }}
+                    onClick={() => {
+                      setRunningStep(step);
+                      runFn();
+                      addLog(`[관리자] ${step} 개별실행`);
+                    }}>
+                    실행
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 

@@ -54,8 +54,9 @@ class BridgeNode(Node):
         self._svc = {
             name: self.create_client(Trigger, f'/robot_art/{name}')
             for name in ('start', 'stop', 'pause', 'resume', 'home',
-                         'gripper_open', 'gripper_close', 'pencil_grip', 'pencil_release', 'calibrate_z', 'frame_task',
-                         'confirm_retry', 'release_estop')
+                         'gripper_open', 'gripper_close', 'pencil_grip', 'pencil_release', 'calibrate_z',
+                         'frame_task', 'frame_lower', 'frame_paper_pickup', 'frame_align', 'frame_upper', 'frame_eject',
+                         'paper_check', 'confirm_retry', 'release_estop')
         }
 
         # DSR 직접 서비스 클라이언트 (estop/release/연결확인)
@@ -373,8 +374,7 @@ async def handle_command(ws: WebSocket, msg: dict):
         await broadcast({"type": "log", "level": "ERROR", "message": result['message']})
 
     elif cmd == "reset_estop":
-        # robot_art_node 경유 — release_estop()이 _abort 플래그도 리셋
-        result = await asyncio.to_thread(_bridge.call_service, 'release_estop', 10.0)
+        result = await asyncio.to_thread(_bridge.call_release_estop)
         db.add_log("E-STOP 해제", "INFO")
         await broadcast({"type": "log", "level": "INFO", "message": result.get('message', 'E-STOP 해제')})
 
@@ -403,6 +403,11 @@ async def handle_command(ws: WebSocket, msg: dict):
 
     elif cmd == "frame_task":
         result = await asyncio.to_thread(_bridge.call_service, 'frame_task', 5.0)
+        level = "INFO" if result['success'] else "ERROR"
+        await broadcast({"type": "log", "level": level, "message": result['message']})
+
+    elif cmd in ("frame_lower", "frame_paper_pickup", "frame_align", "frame_upper", "frame_eject", "paper_check"):
+        result = await asyncio.to_thread(_bridge.call_service, cmd, 5.0)
         level = "INFO" if result['success'] else "ERROR"
         await broadcast({"type": "log", "level": level, "message": result['message']})
 

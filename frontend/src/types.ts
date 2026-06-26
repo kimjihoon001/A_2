@@ -83,6 +83,7 @@ export interface DrawingJob {
 
 export interface DrawingState {
   status: DrawingStatus;
+  currentStep: string;
   currentPixel: number;
   totalPixels: number;
   resWidth: number;
