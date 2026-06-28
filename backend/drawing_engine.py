@@ -13,13 +13,15 @@ from database import Database
 log = logging.getLogger(__name__)
 
 
-def _gray_to_force(gray: int, force_min: float = 3.0, force_max: float = 5.0) -> float | None:
-    """4구간 계단식: gray<=50→max, <=100→2/3, <=150→1/3, <=200→min, >200→스킵"""
-    if   gray <=  50: return force_max
-    elif gray <= 100: return round(force_min + (force_max - force_min) * 2 / 3, 2)
-    elif gray <= 150: return round(force_min + (force_max - force_min) * 1 / 3, 2)
-    elif gray <= 200: return force_min
-    else:             return None
+def _gray_to_force(gray: int, force_min: float = 3.0, force_max: float = 5.0,
+                   steps: list = [50, 100, 150, 200]) -> float | None:
+    """N단계 계단식: steps의 각 경계 이하면 force_max→...→force_min, 초과 시 스킵"""
+    n = len(steps)
+    for i, threshold in enumerate(sorted(steps)):
+        if gray <= threshold:
+            force = force_max - i * (force_max - force_min) / max(n - 1, 1)
+            return round(force, 2)
+    return None
 
 
 def _build_path(pixels: list[dict], calibration: dict,
@@ -202,6 +204,12 @@ class DrawingEngine:
 
         force_min = float(self.db.get_setting("pen_force_min") or 3.0)
         force_max = float(self.db.get_setting("pen_force_max") or 8.0)
+        raw = self.db.get_setting("gray_steps") or "50,100,150,200"
+        gray_steps = [int(v.strip()) for v in raw.split(",") if v.strip().isdigit()]
+        if not (4 <= len(gray_steps) <= 6):
+            self._emit_log(f"gray_steps 단계 수 오류({len(gray_steps)}단계) — 기본 4단계 사용", "WARNING")
+            gray_steps = [50, 100, 150, 200]
+        z_recalib_interval = int(float(self.db.get_setting("z_recalib_interval") or 250))
         settings  = {**settings, "penForceMin": force_min, "penForceMax": force_max}
 
         path = _build_path(pixels, calib, settings=settings)
@@ -295,7 +303,8 @@ class DrawingEngine:
 
                 force = _gray_to_force(step["gray"],
                                        float(settings.get("penForceMin", 3.0)),
-                                       float(settings.get("penForceMax", 5.0)))
+                                       float(settings.get("penForceMax", 5.0)),
+                                       gray_steps)
                 if force is None:
                     self.current_pixel = i + 1
                     continue
@@ -308,6 +317,22 @@ class DrawingEngine:
                         self._finish("cancelled", i)
                         return
 
+
+                # Z 재측정 (z_recalib_interval 픽셀마다)
+                if not dry_run and (i + 1) % z_recalib_interval == 0 and (i + 1) < len(path):
+                    self._emit_log(f"Z 재측정 ({i+1}픽셀 완료)...")
+                    try:
+                        z_result = self.robot.auto_calibrate_z()
+                        if z_result:
+                            new_z_up = z_result["pen_up_z"]
+                            new_z_dn = z_result["pen_down_z"]
+                            self.db.update_calibration_z(new_z_up, new_z_dn)
+                            for remaining in path[i + 1:]:
+                                remaining["z_up"] = new_z_up
+                                remaining["z_dn"] = new_z_dn
+                            self._emit_log(f"Z 재측정 완료: pen_up={new_z_up}mm, pen_down={new_z_dn}mm")
+                    except Exception as e:
+                        self._emit_log(f"Z 재측정 실패: {e} — 기존 값 유지", "WARNING")
 
                 self.current_pixel = i + 1
                 self.message = f"그리는 중... {self.current_pixel:,} / {self.total_pixels:,} 픽셀"

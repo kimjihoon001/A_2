@@ -201,6 +201,20 @@ npm run dev
 
 ---
 
+## 🎬 Demo Video
+
+<p align="center">
+  <!-- 유튜브 업로드 후 아래 VIDEO_ID 교체 -->
+  <!-- <a href="https://www.youtube.com/watch?v=VIDEO_ID">
+    <img src="https://img.youtube.com/vi/VIDEO_ID/maxresdefault.jpg" width="720" alt="Demo Video"/>
+  </a> -->
+
+  <!-- 또는 GitHub에 직접 업로드한 mp4 사용 시 -->
+  <!-- <video src="./docs/videos/demo.mp4" width="720" controls></video> -->
+</p>
+
+---
+
 ## 🖼 Result
 
 <p align="center">

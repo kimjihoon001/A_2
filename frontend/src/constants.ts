@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: Settings = {
   resolutionKey: 'A5_M',
   maxSpeed:      200,
   logRetention:   30,
+  graySteps:     '50,100,150,200',
 };
 
 export const DEFAULT_CONNECTION: Connection = {

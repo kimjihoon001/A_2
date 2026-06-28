@@ -381,9 +381,8 @@ async def handle_command(ws: WebSocket, msg: dict):
 
     elif cmd == "reset_estop":
         await asyncio.to_thread(_bridge.call_service, 'release_estop')
-        result = await asyncio.to_thread(_bridge.call_release_estop)
         db.add_log("E-STOP 해제", "INFO")
-        await broadcast({"type": "log", "level": "INFO", "message": result.get('message', 'E-STOP 해제')})
+        await broadcast({"type": "log", "level": "INFO", "message": "E-STOP 해제 중..."})
 
     elif cmd == "home":
         result = await asyncio.to_thread(_bridge.call_service, 'home')

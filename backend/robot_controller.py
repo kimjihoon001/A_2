@@ -983,6 +983,8 @@ class RobotController:
         contact_z = None
         deadline  = time.time() + 15.0
         while time.time() < deadline:
+            if self._check_abort():
+                break
             try:
                 f = _dsr_funcs['get_tool_force']()
                 fz = abs(f[2]) if f and len(f) > 2 else 0.0
@@ -1078,7 +1080,7 @@ class RobotController:
         DR_BASE       = _dsr_funcs['DR_BASE']
     
 
-        MIN_PAPER_Z = 329
+        MIN_PAPER_Z = 328.4
 
         pos_center = posx(563.03, 75.97, 328.62, 9.86, 180.00, 98.32)
         hover_pos  = posx(pos_center[0], pos_center[1], pos_center[2] + 20,
@@ -1094,10 +1096,12 @@ class RobotController:
 
         task_compliance_ctrl([500, 500, 500, 100, 100, 100])
         time.sleep(0.5)
-        set_desired_force([0, 0, -1, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
+        set_desired_force([0, 0, -3, 0, 0, 0], dir=[0, 0, 1, 0, 0, 0], mod=DR_FC_MOD_REL)
         contact_z = None
-        deadline  = time.time() + 15.0
+        deadline  = time.time() + 5.0
         while time.time() < deadline:
+            if self._check_abort():
+                break
             try:
                 f = _dsr_funcs['get_tool_force']()
                 fz = abs(f[2]) if f and len(f) > 2 else 0.0
@@ -1131,7 +1135,7 @@ class RobotController:
         movel = _dsr_funcs['movel']
         posx  = _dsr_funcs['posx']
 
-        pencil_high = 306.71
+        pencil_high = 291.71
         pos_up   = posx(477.01, -163.54, pencil_high + 150, 70.21, 179.94, -107.98)
         pos_down = posx(477.02, -163.54, pencil_high,        65.91, 179.94, -112.28)
         pos_home = posx(526.83,   54.46, 506.64,             62.97, 179.94, -117.13)
@@ -1181,7 +1185,7 @@ class RobotController:
         movel = _dsr_funcs['movel']
         posx  = _dsr_funcs['posx']
 
-        pencil_high = 306.71
+        pencil_high = 291.71
         pos_up   = posx(477.01, -163.54, pencil_high + 150, 70.21, 179.94, -107.98)
         pos_down = posx(477.02, -163.54, pencil_high,        65.91, 179.94, -112.28)
         pos_home = posx(526.83,   54.46, 506.64,             62.97, 179.94, -117.13)

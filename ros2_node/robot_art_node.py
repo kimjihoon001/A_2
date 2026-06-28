@@ -159,9 +159,9 @@ class RobotArtNode(Node):
         return res
 
     def _svc_release_estop(self, req, res):
-        self.robot.release_estop()
+        threading.Thread(target=self.robot.release_estop, daemon=True).start()
         res.success = True
-        res.message = 'E-STOP 해제'
+        res.message = 'E-STOP 해제 시작'
         return res
 
     def _svc_home(self, req, res):

@@ -96,6 +96,7 @@ class Database:
         'gripper_default_force': (1,    120),
         'pen_force_min':         (0.1,   80),
         'pen_force_max':         (0.1,   80),
+        'z_recalib_interval':    (50,  5000),
     }
 
     def _seed_settings(self):
@@ -109,6 +110,8 @@ class Database:
             ("robot_ip",             "192.168.1.100", "M0609 IP 주소"),
             ("pen_force_min",        "3.0",  "펜 최소 힘 (N) — 밝은 픽셀"),
             ("pen_force_max",        "8.0",  "펜 최대 힘 (N) — 어두운 픽셀"),
+            ("gray_steps",           "50,100,150,200", "명암 단계 경계값 (쉼표 구분, 4~6단계, 마지막 초과 시 스킵)"),
+            ("z_recalib_interval",   "250",  "Z 자동 재측정 픽셀 간격"),
         ]
         with self._conn() as conn:
             conn.executemany(

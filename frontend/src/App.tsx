@@ -183,6 +183,7 @@ export default function App() {
           maxForce:     parse('pen_force_max',        s.maxForce),
           dotHoldMs:    parse('dot_hold_ms',          s.dotHoldMs),
           logRetention: parse('log_retention_days',   s.logRetention),
+          graySteps:    d['gray_steps']?.value ?? s.graySteps,
         }));
       }
     },
@@ -207,9 +208,8 @@ export default function App() {
   function handleResetEstop() {
     lastActionTimeRef.current = Date.now();
     if (serverConnected) server.resetEstop();
-    setRobotState(s => ({ ...s, status: 'idle' }));
-    addAlarm('info', '비상정지 해제됨');
-    addLog('E-STOP 해제');
+    addAlarm('info', '비상정지 해제 중...');
+    addLog('E-STOP 해제 요청');
   }
 
   // ── 원점 복귀 ────────────────────────────────────────────────
@@ -355,6 +355,7 @@ export default function App() {
           log_retention_days: String(s.logRetention),
           pen_force_min:      String(s.minForce),
           pen_force_max:      String(s.maxForce),
+          gray_steps:         s.graySteps,
           hmi_settings:       JSON.stringify(s),
         });
       }} addLog={addLog} />
