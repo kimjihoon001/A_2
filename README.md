@@ -4,10 +4,6 @@
 > 이미지를 업로드하면 픽셀 아트로 변환하고, 로봇이 펜으로 한 점씩 찍어 작품을 완성합니다.
 
 <p align="center">
-  <img src="./docs/video/demo_small.gif" width="720" alt="Robot Art Studio Demo"/>
-</p>
-
-<p align="center">
   <img src="https://img.shields.io/badge/ROS2-Humble-22314E?style=for-the-badge&logo=ros&logoColor=white"/>
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
   <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
@@ -204,22 +200,20 @@ npm run dev
 ## 🎬 Demo Video
 
 <p align="center">
-  <!-- 유튜브 업로드 후 아래 VIDEO_ID 교체 -->
-  <!-- <a href="https://www.youtube.com/watch?v=VIDEO_ID">
-    <img src="https://img.youtube.com/vi/VIDEO_ID/maxresdefault.jpg" width="720" alt="Demo Video"/>
-  </a> -->
-
-  <!-- 또는 GitHub에 직접 업로드한 mp4 사용 시 -->
-  <!-- <video src="./docs/videos/demo.mp4" width="720" controls></video> -->
+  <img src="./docs/video/demo_small.gif" width="720" alt="Robot Drawing Demo"/>
 </p>
 
 ---
 
 ## 🖼 Result
 
-<p align="center">
-  <img src="./docs/images/result_art.png" width="500" alt="Final Result"/>
-</p>
+| Pikachu | Mario |
+| :---: | :---: |
+| <img src="./docs/images/20260628_173505.jpg" width="360"/> | <img src="./docs/images/20260628_173530.jpg" width="360"/> |
+
+| Starry Night | Photo Style |
+| :---: | :---: |
+| <img src="./docs/images/20260628_173558.jpg" width="360"/> | <img src="./docs/images/20260628_173654.jpg" width="360"/> |
 
 ---
 
