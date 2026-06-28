@@ -4,7 +4,7 @@
 > 이미지를 업로드하면 픽셀 아트로 변환하고, 로봇이 펜으로 한 점씩 찍어 작품을 완성합니다.
 
 <p align="center">
-  <img src="./docs/images/main_demo.gif" width="720" alt="Robot Art Studio Demo"/>
+  <img src="./docs/video/demo_small.gif" width="720" alt="Robot Art Studio Demo"/>
 </p>
 
 <p align="center">
