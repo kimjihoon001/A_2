@@ -13,12 +13,15 @@ from database import Database
 log = logging.getLogger(__name__)
 
 
-def _gray_to_force(gray: int, force_min: float = 3.0, force_max: float = 5.0) -> float | None:
-    """선형 매핑: gray 0→force_max, gray 200→force_min, 200 초과는 스킵"""
-    if gray > 200:
-        return None
-    force = force_max - (gray / 200.0) * (force_max - force_min)
-    return round(force, 2)
+def _gray_to_force(gray: int, force_min: float = 3.0, force_max: float = 5.0,
+                   steps: list = [50, 100, 150, 200]) -> float | None:
+    """N단계 계단식: steps의 각 경계 이하면 force_max→...→force_min, 초과 시 스킵"""
+    n = len(steps)
+    for i, threshold in enumerate(sorted(steps)):
+        if gray <= threshold:
+            force = force_max - i * (force_max - force_min) / max(n - 1, 1)
+            return round(force, 2)
+    return None
 
 
 def _build_path(pixels: list[dict], calibration: dict,
@@ -47,8 +50,8 @@ def _build_path(pixels: list[dict], calibration: dict,
     z_dn = float(calibration["pen_down_z"])
     ox   = float(calibration["origin_x"]) + FRAME_MARGIN_X
     oy   = float(calibration["origin_y"]) + FRAME_MARGIN_Y
-    mm_per_px_y = 1.67
     mm_per_px_x = 1.67
+    mm_per_px_y = 1.67
 
     force_min = float(settings.get("penForceMin", 3.0)) if settings else 3.0
     force_max = float(settings.get("penForceMax", 5.0)) if settings else 5.0
@@ -59,8 +62,6 @@ def _build_path(pixels: list[dict], calibration: dict,
     if not has_dark:
         return []
 
-    log.info(f"_build_path: width={width} height={height} ox={ox:.1f} oy={oy:.1f}")
-
     path = []
     for y in range(height):
         x_range = range(width) if y % 2 == 0 else range(width - 1, -1, -1)
@@ -70,7 +71,6 @@ def _build_path(pixels: list[dict], calibration: dict,
                 continue
             rx = ox + (height - 1 - y) * mm_per_px_y
             ry = oy + (width  - 1 - x) * mm_per_px_x
-            log.info(f"  px=({x},{y}) → rx={rx:.1f} ry={ry:.1f}")
             path.append({
                 "rx"  : rx,
                 "ry"  : ry,
@@ -207,6 +207,11 @@ class DrawingEngine:
 
         force_min = float(self.db.get_setting("pen_force_min") or 3.0)
         force_max = float(self.db.get_setting("pen_force_max") or 8.0)
+        raw = self.db.get_setting("gray_steps") or "50,100,150,200"
+        gray_steps = [int(v.strip()) for v in raw.split(",") if v.strip().isdigit()]
+        if not (4 <= len(gray_steps) <= 6):
+            self._emit_log(f"gray_steps 단계 수 오류({len(gray_steps)}단계) — 기본 4단계 사용", "WARNING")
+            gray_steps = [50, 100, 150, 200]
         z_recalib_interval = int(float(self.db.get_setting("z_recalib_interval") or 250))
         settings  = {**settings, "penForceMin": force_min, "penForceMax": force_max}
 
@@ -301,7 +306,8 @@ class DrawingEngine:
 
                 force = _gray_to_force(step["gray"],
                                        float(settings.get("penForceMin", 3.0)),
-                                       float(settings.get("penForceMax", 5.0)))
+                                       float(settings.get("penForceMax", 5.0)),
+                                       gray_steps)
                 if force is None:
                     self.current_pixel = i + 1
                     continue

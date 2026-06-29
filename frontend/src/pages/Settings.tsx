@@ -58,6 +58,58 @@ export default function SettingsPage({ settings, setSettings, addLog }: Props) {
               {n('dotHoldMs', 50, 2000)}
             </div>
           </div>
+          {/* 명암 단계 선택 */}
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>명암 단계 (4~6단계)</div>
+            {/* 단계 수 선택 */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              {([4, 5, 6] as const).map(n => {
+                const presets: Record<number, string> = {
+                  4: '50,100,150,200',
+                  5: '40,80,120,160,200',
+                  6: '34,68,102,136,170,200',
+                };
+                const current = form.graySteps.split(',').filter(Boolean).length;
+                return (
+                  <button key={n} type="button"
+                    className={current === n ? 'btn-primary' : 'btn-outline'}
+                    style={{ padding: '6px 18px' }}
+                    onClick={() => setForm(p => ({ ...p, graySteps: presets[n] }))}>
+                    {n}단계
+                  </button>
+                );
+              })}
+            </div>
+            {/* 경계값 직접 편집 */}
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10 }}>
+              {form.graySteps.split(',').filter(Boolean).map((v, i, arr) => {
+                const force = arr.length === 1 ? form.maxForce
+                  : +(form.maxForce - i * (form.maxForce - form.minForce) / (arr.length - 1)).toFixed(1);
+                return (
+                  <div key={i} style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--accent2)', marginBottom: 2 }}>{force}N</div>
+                    <input
+                      type="number" min={1} max={254}
+                      value={v}
+                      style={{ width: 52, textAlign: 'center' }}
+                      onChange={e => {
+                        const parts = form.graySteps.split(',');
+                        parts[i] = e.target.value;
+                        setForm(p => ({ ...p, graySteps: parts.join(',') }));
+                      }}
+                    />
+                    <div style={{ fontSize: 10, color: 'var(--text2)', marginTop: 2 }}>{i+1}단계</div>
+                  </div>
+                );
+              })}
+              <div style={{ textAlign: 'center', paddingBottom: 18 }}>
+                <div style={{ fontSize: 10, color: 'var(--text2)' }}>스킵</div>
+                <div style={{ fontSize: 12, color: 'var(--text2)', padding: '4px 8px', background: 'var(--panel2)', borderRadius: 4 }}>
+                  {Number(form.graySteps.split(',').filter(Boolean).at(-1) ?? 200)+1}~255
+                </div>
+              </div>
+            </div>
+          </div>
 
           <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--panel2)', borderRadius: 6, fontSize: 12, color: 'var(--text2)' }}>
             힘 매핑: 회색값 255(흰색) → {form.minForce} N, 회색값 0(검정) → {form.maxForce} N
