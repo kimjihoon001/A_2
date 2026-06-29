@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(ros2 topic *)",
-      "Bash(ros2 node *)",
-      "Bash(ros2 param *)"
-    ]
-  }
-}
