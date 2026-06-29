@@ -37,6 +37,14 @@ flowchart LR
 
 ## 2. 🖥️ 운영체제 환경 (OS Environment)
 
+<p>
+  <img src="https://img.shields.io/badge/Ubuntu-22.04 LTS-E95420?style=for-the-badge&logo=ubuntu&logoColor=white"/>
+  <img src="https://img.shields.io/badge/ROS2-Humble-22314E?style=for-the-badge&logo=ros&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
+  <img src="https://img.shields.io/badge/TypeScript-5.x-3178C6?style=for-the-badge&logo=typescript&logoColor=white"/>
+  <img src="https://img.shields.io/badge/VS Code-IDE-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white"/>
+</p>
+
 | 항목 | 내용 |
 |:---|:---|
 | **OS** | Ubuntu 22.04 LTS |
