@@ -167,15 +167,23 @@ npm run dev
 
 ## 8. 🔌 ROS2 Communication
 
-| Service | Description |
-| --- | --- |
-| `/robot_art/start` | 드로잉 시작 |
-| `/robot_art/stop` | 작업 정지 |
-| `/robot_art/estop` | 비상 정지 |
-| `/robot_art/release_estop` | 비상 정지 해제 |
-| `/robot_art/home` | 홈 위치 복귀 |
-| `/robot_art/pencil_grip` | 펜 파지 |
-| `/robot_art/pencil_release` | 펜 반납 |
+| Service | Type | Description |
+| --- | --- | --- |
+| `/robot_art/start` | `std_srvs/srv/Trigger` | 드로잉 시작 |
+| `/robot_art/stop` | `std_srvs/srv/Trigger` | 작업 정지 |
+| `/robot_art/estop` | `std_srvs/srv/Trigger` | 비상 정지 |
+| `/robot_art/release_estop` | `std_srvs/srv/Trigger` | 비상 정지 해제 |
+| `/robot_art/home` | `std_srvs/srv/Trigger` | 홈 위치 복귀 |
+| `/robot_art/pencil_grip` | `std_srvs/srv/Trigger` | 펜 파지 |
+| `/robot_art/pencil_release` | `std_srvs/srv/Trigger` | 펜 반납 |
+| `/dsr01/system/servo_off` | `dsr_msgs2/srv/ServoOff` | DSR 서보 오프 |
+| `/dsr01/system/set_robot_control` | `dsr_msgs2/srv/SetRobotControl` | DSR 로봇 제어 설정 |
+| `/dsr01/system/get_robot_state` | `dsr_msgs2/srv/GetRobotState` | DSR 로봇 상태 조회 |
+| `/dsr01/system/set_robot_mode` | `dsr_msgs2/srv/SetRobotMode` | DSR 로봇 모드 설정 |
+| `/dsr01/system/set_safe_stop_reset_type` | `dsr_msgs2/srv/SetSafeStopResetType` | DSR 안전 정지 리셋 타입 설정 |
+| `/dsr01/motion/jog` | `dsr_msgs2/srv/Jog` | DSR 조그 이동 |
+| `/dsr01/motion/jog_multi` | `dsr_msgs2/srv/JogMulti` | DSR 다축 조그 이동 |
+| `/dsr01/motion/move_stop` | `dsr_msgs2/srv/MoveStop` | DSR 모션 정지 |
 
 | Topic | Type | Description |
 | --- | --- | --- |
