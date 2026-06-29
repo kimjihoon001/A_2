@@ -746,10 +746,11 @@ class RobotController:
             DR_FC_MOD_REL = _dsr_funcs['DR_FC_MOD_REL']
 
             # 픽셀 위치 그대로 hover (원점 = 픽셀 좌상단)
-            hover_pos = posx(x, y, z_up, 0, 180, 0)
+            hover_pos   = posx(x, y, z_up,    0, 180, 0)
+            contact_pos = posx(x, y, z_ready, 0, 180, 0)
 
             try:
-                # 상공 → 픽셀 위치로 이동
+                # 1) 상공으로 이동
                 ret = movel(hover_pos, vel=self._move_speed, acc=self._move_speed * 2)
                 log.info(f"movel hover ret={ret}")
 
@@ -758,7 +759,10 @@ class RobotController:
 
                 self._wait_if_paused()
 
-                # 컴플라이언스 + 목표 힘 인가
+                # 2) 종이 접촉 위치(z_dn)로 먼저 내려감 — 힘 인가 전에 도달해야 빠르게 쌓임
+                movel(contact_pos, vel=self._move_speed, acc=self._move_speed * 2)
+
+                # 3) 컴플라이언스 + 목표 힘 인가
                 time.sleep(0.03)
                 _dsr_funcs['task_compliance_ctrl']([3000, 3000, 500, 100, 100, 100])
                 time.sleep(0.03)
@@ -767,10 +771,10 @@ class RobotController:
                     dir=[0, 0, 1, 0, 0, 0],
                     mod=DR_FC_MOD_REL,
                 )
-                # 실제 힘이 목표의 70%에 도달할 때까지 대기 (최대 1.5초)
+                # 실제 힘이 목표의 70%에 도달할 때까지 대기 (최대 1.0초 — 이미 접촉 위치에 있어 빠름)
                 # self.state.tool_force는 구독 미구현으로 항상 0이므로 get_tool_force() 직접 호출
                 t0 = time.time()
-                deadline = t0 + 1.5
+                deadline = t0 + 1.0
                 while time.time() < deadline:
                     if self._check_abort():
                         return

@@ -34,8 +34,11 @@ def _build_path(pixels: list[dict], calibration: dict,
     if not pixels:
         return []
 
-    width  = max(p["x"] for p in pixels) + 1
-    height = max(p["y"] for p in pixels) + 1
+    width  = int(settings.get("resWidth",  0)) if settings else 0
+    height = int(settings.get("resHeight", 0)) if settings else 0
+    if width == 0 or height == 0:
+        width  = max(p["x"] for p in pixels) + 1
+        height = max(p["y"] for p in pixels) + 1
 
     grid: dict[tuple, int] = {(p["x"], p["y"]): p["gray"] for p in pixels}
 

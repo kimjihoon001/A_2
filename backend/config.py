@@ -38,7 +38,7 @@ GRIPPER_DEFAULT_FORCE = 40  # N
 DOT_HOLD_SEC = 0.15   # 초 (폴백용)
 
 # 픽셀 사각형 래스터 스캔 설정
-PIXEL_SIZE_MM  = 2.0  # 픽셀 하나의 가로세로 크기 (mm)
+PIXEL_SIZE_MM  = 1.67  # 픽셀 하나의 가로세로 크기 (mm)
 PIXEL_PITCH_MM = 1.0  # 래스터 선 간격 (mm)
 
 # 상태 업데이트 주기
