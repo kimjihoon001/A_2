@@ -1,193 +1,108 @@
-# 🤖 Robot Art Studio
+# Robot Art Studio — M0609 픽셀 점묘화 자동 출력 시스템
 
-> **Doosan M0609 협동로봇 기반 픽셀 점묘화 자동 출력 시스템**
-> 이미지를 업로드하면 픽셀 아트로 변환하고, 로봇이 펜으로 한 점씩 찍어 작품을 완성합니다.
-
-<p align="center">
-  <img src="https://img.shields.io/badge/ROS2-Humble-22314E?style=for-the-badge&logo=ros&logoColor=white"/>
-  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
-  <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
-  <img src="https://img.shields.io/badge/React-Frontend-61DAFB?style=for-the-badge&logo=react&logoColor=black"/>
-  <img src="https://img.shields.io/badge/Doosan-M0609-red?style=for-the-badge"/>
-</p>
+> **조 이름:** A-2 - Memory Catcher
+> **팀원:** 김형준 · 김재엽 · 김지훈 · 정태성
 
 ---
 
-## ✨ 프로젝트 소개
+## 1. 🎨 시스템 설계 및 플로우 차트
 
-**Robot Art Studio**는 사용자가 업로드한 이미지를 그레이스케일 픽셀 데이터로 변환한 뒤,
-두산 **M0609 협동로봇**과 **RG2 그리퍼**를 이용해 종이에 점묘화 형태로 출력하는 시스템입니다.
-
-고객용 화면에서는 이미지를 업로드하고 결과를 미리 볼 수 있으며,
-관리자 HMI에서는 로봇 상태, 진행률, 힘 제어, 그리퍼, 캘리브레이션 등을 제어할 수 있습니다.
-
----
-
-## 🧩 System Architecture
+### 1-1. 시스템 설계도 (System Architecture)
 
 ```mermaid
 flowchart LR
     A[Customer UI<br/>React / Vite] -->|WebSocket| B[Backend Server<br/>FastAPI]
     B --> C[ROS2 Bridge Node<br/>rclpy]
-    C --> D[DSR Controller2]
-    D --> E[Doosan M0609<br/>+ RG2 Gripper]
-    B --> F[(SQLite DB)]
+    C --> D[robot_art_node<br/>DrawingEngine]
+    D --> E[DSR Controller2]
+    E --> F[Doosan M0609<br/>+ RG2 Gripper]
+    B --> G[(SQLite DB)]
+```
+
+### 1-2. 플로우 차트 (Flow Chart)
+
+<p align="center">
+  <img src="./docs/images/flow_chart.png" alt="플로우 차트" width="320">
+</p>
+
+---
+
+## 2. 🖥️ 운영체제 환경 (OS Environment)
+
+| 항목 | 내용 |
+|:---|:---|
+| **OS** | Ubuntu 22.04 LTS |
+| **ROS Version** | ROS2 Humble Hawksbill |
+| **Language** | Python 3.10, TypeScript |
+| **IDE** | VS Code |
+
+> ⚠️ VM/Docker 사용 시 네트워크를 **Host 모드**로 설정해야 로봇과 정상 통신됩니다.
+
+---
+
+## 3. 🛠️ 사용 장비 목록 (Hardware List)
+
+| 장비명 (Model) | 수량 | 비고 |
+|:---:|:---:|:---|
+| Doosan M0609 | 1 | 6축 협동로봇 |
+| OnRobot RG2 | 1 | 전동 그리퍼 (Modbus TCP) |
+| 일반 용지 (A5) | - | 그리기 매체 |
+| 연필 | - | 드로잉 도구 |
+
+---
+
+## 4. 📦 의존성 (Dependencies)
+
+### Backend (Python)
+```
+Python >= 3.10
+fastapi
+uvicorn
+websockets
+pymodbus
+rclpy (ROS2 Humble)
+```
+
+### Frontend (Node.js)
+```
+Node.js >= 18
+React 19
+TypeScript
+Vite
+```
+
+### ROS2 패키지
+```
+dsr_msgs2
+dsr_hardware2
+controller_manager
 ```
 
 ---
 
-## 🛠 Tech Stack
+## 5. ▶️ 실행 순서 (Usage Guide)
 
-| Part             | Tech                                 |
-| ---------------- | ------------------------------------ |
-| Frontend         | React 19, TypeScript, Vite           |
-| Backend          | FastAPI, WebSocket, Python           |
-| Robot Control    | ROS2 Humble, rclpy, DSR Controller2  |
-| Hardware         | Doosan M0609, OnRobot RG2            |
-| Image Processing | Canvas API / Pixel Conversion        |
-| Database         | SQLite                               |
-
----
-
-## 💻 지원 운영체제 및 환경 (OS & Environment)
-
-본 프로젝트는 두산 로보틱스(Doosan Robotics) 협동로봇 제어와 원활한 실시간 통신을 위해 아래의 운영체제 및 환경에 최적화되어 있습니다.
-
-### 🐧 권장 운영체제 (Recommended OS)
-* **Ubuntu 22.04 LTS (Jammy Jellyfish)**
-  * 프로젝트 내 로봇 제어 백엔드 및 ROS 2 패키지(`dsr_msgs2`)가 Ubuntu 환경을 네이티브로 지원합니다.
-  * Windows나 macOS 사용자의 경우 가상머신(VMware, VirtualBox) 또는 WSL2를 통해 Ubuntu 22.04 환경을 구축하여 실행하는 것을 권장합니다.
-
-### 🤖 필수 프레임워크 및 언어
-* **ROS 2 Humble Hawksbill**
-  * 로봇과의 통신, 위치 제어, 상태 모니터링 및 비상 정지(E-Stop) 기능을 수행하기 위해 ROS 2 Humble 버전이 설치되어 있어야 합니다.
-* **Backend**: Python 3.10 이상 (Ubuntu 22.04 기본 지원)
-* **Frontend**: Node.js (v18 이상 권장) 기반의 React 환경
-
-### ⚠️ 네트워크 및 하드웨어 제어 주의사항
-* 이 시스템은 로봇의 실시간 관절 제어 및 서보 모터 전력 차단(`ServoOff`)과 같은 민감한 하드웨어 안전 제어를 수행합니다.
-* 가상머신(VM)이나 컨테이너(Docker) 환경에서 실행할 경우, 네트워크 설정을 반드시 **호스트(Host) 또는 브릿지(Bridge) 모드**로 구성하여 로봇 제어기와의 TCP/IP 및 통신 패킷 유실이 발생하지 않도록 주의해야 합니다.
-
-## 🚀 Main Features
-
-### 🎨 Image to Pixel Art
-
-* 업로드 이미지 그레이스케일 변환
-* 설정 해상도(최대 64×64 등)에 맞춰 픽셀화
-* 밝기 단계별 점묘화 데이터 생성 (gray ≤ 200 픽셀만 실제 작업)
-
-### 🤖 Robot Drawing
-
-* 픽셀 좌표 기반 로봇 경로 생성
-* 펜 압력 / 접촉 시간 기반 명암 표현
-* 흰색 영역 생략으로 작업 시간 단축
-
-### 🖥 HMI Dashboard
-
-* 고객용 이미지 업로드 화면
-* 관리자용 로봇 제어 화면
-* 진행률, 로그, 현재 좌표, 힘 센서 상태 표시
-
-### 🛑 Safety Control
-
-* E-STOP (서보 즉시 OFF + 하드웨어 토크 차단)
-* 로봇 정지 / 재개
-* 그리퍼 수동 제어
-* 캘리브레이션 및 원점 복귀
-
-### 🖼 액자 자동화
-
-* 종이 픽업 → 정렬 → 그리기 → 액자 상/하판 조립 → 배출 전 자동화
-
----
-
-## 📸 Preview
-
-| Customer Screen | Admin Dashboard |
-| --- | --- |
-| <img src="./docs/images/customer_screen.png" width="360"/> | <img src="./docs/images/admin_dashboard.png" width="360"/> |
-
-| Pixel Preview | Robot Drawing |
-| --- | --- |
-| <img src="./docs/images/pixel_preview.png" width="360"/> | <img src="./docs/images/robot_drawing.gif" width="360"/> |
-
-| 전체 동작 흐름 | 개별 동작 제어 |
-| --- | --- |
-| <img src="./docs/video/모든동작.gif" width="360"/> | <img src="./docs/video/개별동작.gif" width="360"/> |
-
-| 일시정지 / 재개 | 캘리브레이션 |
-| --- | --- |
-| <img src="./docs/video/일시정지.gif" width="360"/> | <img src="./docs/video/캘리브레이션.gif" width="360"/> |
-
-| 통신 연결 상태 |
-| --- |
-| <img src="./docs/video/통신연결상태.gif" width="360"/> |
-
----
-
-## 📁 Project Structure
+### Step 1. ROS2 Workspace 빌드
 
 ```bash
-A_2/
-├── backend/
-│   ├── main.py               # FastAPI WebSocket 서버 + ROS2 브릿지 노드
-│   ├── robot_controller.py   # 로봇 동작 제어 (movej/movel/그리퍼/E-STOP 등)
-│   ├── drawing_engine.py     # 드로잉 경로 생성 및 실행 스레드
-│   ├── database.py           # SQLite DB (캘리브레이션, 설정, 작업 이력)
-│   ├── config.py             # 로봇 IP, 속도, 그리퍼 등 전역 설정
-│   └── requirements.txt
-│
-├── frontend/
-│   └── src/
-│       ├── App.tsx            # 메인 앱 (WebSocket 연결, 상태 관리)
-│       ├── pages/
-│       │   ├── CustomerScreen.tsx   # 고객용 이미지 업로드/미리보기
-│       │   ├── DrawingControl.tsx   # 관리자 드로잉 단계 제어
-│       │   ├── Safety.tsx           # E-STOP / 비상 해제
-│       │   ├── Calibration.tsx      # 캘리브레이션
-│       │   ├── Dashboard.tsx        # 상태 대시보드
-│       │   ├── Gripper.tsx          # 그리퍼 수동 제어
-│       │   └── Settings.tsx         # 속도/힘 설정
-│       └── hooks/             # WebSocket 훅 등
-│
-├── ros2_node/
-│   └── robot_art_node.py     # ROS2 서비스 서버 (start/stop/estop 등)
-│
-├── tools/
-│   └── pixelart.py           # 이미지 픽셀 변환 유틸리티
-│
-├── ws_edu/
-│   └── src/cobot_rg2/        # 두산 ROS2 패키지 (dsr_controller2 등)
-│
-├── ros2_communication.txt    # ROS2 토픽/서비스 전체 목록
-└── README.md
-```
-
----
-
-## ⚙️ Installation & Run
-
-### 1. ROS2 Workspace Build
-
-```bash
-cd ws_edu
+cd ~/ws_cobot_pjt/ws_edu
 colcon build --symlink-install
 source install/setup.bash
 ```
 
-### 2. Run Robot Bringup
+### Step 2. 로봇 bringup (실제 로봇)
 
 ```bash
-ros2 launch dsr_bringup2 m0609_rg2_bringup.launch.py
+ros2 launch m0609_rg2_bringup bringup.launch.py mode:=real host:=192.168.1.100 model:=m0609
 ```
 
-### 3. Run Robot Art Node
+### Step 3. robot_art_node 실행
 
 ```bash
 python3 ros2_node/robot_art_node.py
 ```
 
-### 4. Run Backend
+### Step 4. Backend 실행
 
 ```bash
 cd backend
@@ -195,7 +110,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### 5. Run Frontend
+### Step 5. Frontend 실행
 
 ```bash
 cd frontend
@@ -205,44 +120,35 @@ npm run dev
 
 ---
 
-## 🔌 ROS2 Communication
+## 6. 📸 Preview
 
-자세한 전체 목록은 [`ros2_communication.txt`](ros2_communication.txt) 참고.
+### 손님 화면 (Customer Screen)
 
-### Services (모두 `std_srvs/Trigger`)
+| 이미지 등록 | 이미지 크롭 |
+| :---: | :---: |
+| <img src="./docs/video/hmi 이미지 등록.gif" width="360"/> | <img src="./docs/video/hmi 이미지 크롭.gif" width="360"/> |
 
-| Service | Description |
-| --- | --- |
-| `/robot_art/start` | 드로잉 시작 |
-| `/robot_art/stop` | 작업 정지 |
-| `/robot_art/estop` | 비상 정지 |
-| `/robot_art/release_estop` | 비상 정지 해제 |
-| `/robot_art/home` | 홈 위치 복귀 |
-| `/robot_art/pencil_grip` | 펜 파지 |
-| `/robot_art/pencil_release` | 펜 반납 |
-| `/robot_art/paper_check` | 종이 감지 확인 |
-| `/robot_art/frame_task` | 액자 작업 전체 실행 |
+| 이미지 편집 | 픽셀 편집 |
+| :---: | :---: |
+| <img src="./docs/video/hmi 이미지 편집.gif" width="360"/> | <img src="./docs/video/hmi 픽셀 편집.gif" width="360"/> |
 
-### Topics
+### 관리자 HMI
 
-| Topic | Type | Description |
-| --- | --- | --- |
-| `/robot_art/pixels` | `std_msgs/String` | 픽셀 데이터 전달 |
-| `/robot_art/status` | `std_msgs/String` | 로봇 상태 전달 |
-| `/dsr01/msg/joint_state` | `Float64MultiArray` | 로봇 조인트 상태 |
-| `/dsr01/msg/current_posx` | `Float64MultiArray` | TCP 위치 |
+| 전체 동작 흐름 | 개별 동작 제어 |
+| :---: | :---: |
+| <img src="./docs/video/모든동작.gif" width="360"/> | <img src="./docs/video/개별동작.gif" width="360"/> |
 
----
+| 일시정지 / 재개 | 캘리브레이션 |
+| :---: | :---: |
+| <img src="./docs/video/일시정지.gif" width="360"/> | <img src="./docs/video/캘리브레이션.gif" width="360"/> |
 
-## 🎬 Demo Video
-
-<p align="center">
-  <img src="./docs/video/demo_small.gif" width="720" alt="Robot Drawing Demo"/>
-</p>
+| 통신 연결 상태 |
+| :---: |
+| <img src="./docs/video/통신연결상태.gif" width="360"/> |
 
 ---
 
-## 🖼 Result
+## 7. 🖼 결과물
 
 | Pikachu | Mario |
 | :---: | :---: |
@@ -254,23 +160,21 @@ npm run dev
 
 ---
 
-## 👥 Team
+## 8. 🔌 ROS2 Communication
 
-**M0609 RG2 Pixel Art Printer Team**
-
-| Role | Work |
+| Service | Description |
 | --- | --- |
-| Robot Control | M0609 동작 제어, 그리퍼 제어, ROS2 연동 |
-| Backend | FastAPI, WebSocket, 상태 관리 |
-| Frontend | 고객 화면, 관리자 HMI |
-| Image Processing | 픽셀 변환, 명암 단계 처리 |
+| `/robot_art/start` | 드로잉 시작 |
+| `/robot_art/stop` | 작업 정지 |
+| `/robot_art/estop` | 비상 정지 |
+| `/robot_art/release_estop` | 비상 정지 해제 |
+| `/robot_art/home` | 홈 위치 복귀 |
+| `/robot_art/pencil_grip` | 펜 파지 |
+| `/robot_art/pencil_release` | 펜 반납 |
 
----
-
-## 📌 Future Improvements
-
-* MoveIt 기반 경로 최적화
-* 카메라 기반 종이 위치 보정
-* 실시간 힘 제어 안정화
-* CMY 컬러 점묘화 확장
-* 작업 결과 자동 저장 및 히스토리 관리
+| Topic | Type | Description |
+| --- | --- | --- |
+| `/robot_art/pixels` | `std_msgs/String` | 픽셀 데이터 전달 |
+| `/robot_art/status` | `std_msgs/String` | 로봇 상태 전달 |
+| `/dsr01/msg/joint_state` | `Float64MultiArray` | 로봇 조인트 상태 |
+| `/dsr01/msg/current_posx` | `Float64MultiArray` | TCP 위치 |
