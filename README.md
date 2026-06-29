@@ -181,7 +181,13 @@ source install/setup.bash
 ros2 launch dsr_bringup2 m0609_rg2_bringup.launch.py
 ```
 
-### 3. Run Backend
+### 3. Run Robot Art Node
+
+```bash
+python3 ros2_node/robot_art_node.py
+```
+
+### 4. Run Backend
 
 ```bash
 cd backend
@@ -189,7 +195,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-### 4. Run Frontend
+### 5. Run Frontend
 
 ```bash
 cd frontend
