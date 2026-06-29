@@ -31,7 +31,6 @@ export interface Settings {
   resolutionKey: string;
   maxSpeed: number;
   logRetention: number;
-  graySteps: string;
 }
 
 export interface Connection {

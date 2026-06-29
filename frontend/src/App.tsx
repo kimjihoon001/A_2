@@ -183,7 +183,6 @@ export default function App() {
           maxForce:     parse('pen_force_max',        s.maxForce),
           dotHoldMs:    parse('dot_hold_ms',          s.dotHoldMs),
           logRetention: parse('log_retention_days',   s.logRetention),
-          graySteps:    d['gray_steps']?.value ?? s.graySteps,
         }));
       }
     },
@@ -355,7 +354,6 @@ export default function App() {
           log_retention_days: String(s.logRetention),
           pen_force_min:      String(s.minForce),
           pen_force_max:      String(s.maxForce),
-          gray_steps:         s.graySteps,
           hmi_settings:       JSON.stringify(s),
         });
       }} addLog={addLog} />
