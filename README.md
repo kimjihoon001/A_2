@@ -11,7 +11,7 @@
 
 ```mermaid
 flowchart LR
-    A[Customer UI<br/>React / Vite] -->|WebSocket| B[Backend Server<br/>FastAPI]
+    A[Customer UI<br/>React + TypeScript / Vite] -->|WebSocket| B[Backend Server<br/>FastAPI]
     B --> C[ROS2 Bridge Node<br/>rclpy]
     C --> D[robot_art_node<br/>DrawingEngine]
     D --> E[DSR Controller2]
