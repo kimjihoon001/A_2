@@ -3,6 +3,14 @@
 > **조 이름:** A-2 - Memory Catcher
 > **팀원:** 김형준 · 김재엽 · 김지훈 · 정태성
 
+<p align="center">
+  <img src="https://img.shields.io/badge/ROS2-Humble-22314E?style=for-the-badge&logo=ros&logoColor=white"/>
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
+  <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white"/>
+  <img src="https://img.shields.io/badge/React-Frontend-61DAFB?style=for-the-badge&logo=react&logoColor=black"/>
+  <img src="https://img.shields.io/badge/Doosan-M0609-red?style=for-the-badge"/>
+</p>
+
 ---
 
 ## 1. 🎨 시스템 설계 및 플로우 차트
