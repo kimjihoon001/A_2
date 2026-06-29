@@ -49,6 +49,25 @@ flowchart LR
 
 ---
 
+## 💻 지원 운영체제 및 환경 (OS & Environment)
+
+본 프로젝트는 두산 로보틱스(Doosan Robotics) 협동로봇 제어와 원활한 실시간 통신을 위해 아래의 운영체제 및 환경에 최적화되어 있습니다.
+
+### 🐧 권장 운영체제 (Recommended OS)
+* **Ubuntu 22.04 LTS (Jammy Jellyfish)**
+  * 프로젝트 내 로봇 제어 백엔드 및 ROS 2 패키지(`dsr_msgs2`)가 Ubuntu 환경을 네이티브로 지원합니다.
+  * Windows나 macOS 사용자의 경우 가상머신(VMware, VirtualBox) 또는 WSL2를 통해 Ubuntu 22.04 환경을 구축하여 실행하는 것을 권장합니다.
+
+### 🤖 필수 프레임워크 및 언어
+* **ROS 2 Humble Hawksbill**
+  * 로봇과의 통신, 위치 제어, 상태 모니터링 및 비상 정지(E-Stop) 기능을 수행하기 위해 ROS 2 Humble 버전이 설치되어 있어야 합니다.
+* **Backend**: Python 3.10 이상 (Ubuntu 22.04 기본 지원)
+* **Frontend**: Node.js (v18 이상 권장) 기반의 React 환경
+
+### ⚠️ 네트워크 및 하드웨어 제어 주의사항
+* 이 시스템은 로봇의 실시간 관절 제어 및 서보 모터 전력 차단(`ServoOff`)과 같은 민감한 하드웨어 안전 제어를 수행합니다.
+* 가상머신(VM)이나 컨테이너(Docker) 환경에서 실행할 경우, 네트워크 설정을 반드시 **호스트(Host) 또는 브릿지(Bridge) 모드**로 구성하여 로봇 제어기와의 TCP/IP 및 통신 패킷 유실이 발생하지 않도록 주의해야 합니다.
+
 ## 🚀 Main Features
 
 ### 🎨 Image to Pixel Art
