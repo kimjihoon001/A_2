@@ -111,6 +111,18 @@ flowchart LR
 | --- | --- |
 | <img src="./docs/images/pixel_preview.png" width="360"/> | <img src="./docs/images/robot_drawing.gif" width="360"/> |
 
+| 전체 동작 흐름 | 개별 동작 제어 |
+| --- | --- |
+| <img src="./docs/video/모든동작.gif" width="360"/> | <img src="./docs/video/개별동작.gif" width="360"/> |
+
+| 일시정지 / 재개 | 캘리브레이션 |
+| --- | --- |
+| <img src="./docs/video/일시정지.gif" width="360"/> | <img src="./docs/video/캘리브레이션.gif" width="360"/> |
+
+| 통신 연결 상태 |
+| --- |
+| <img src="./docs/video/통신연결상태.gif" width="360"/> |
+
 ---
 
 ## 📁 Project Structure
