@@ -1084,7 +1084,7 @@ class RobotController:
         DR_BASE       = _dsr_funcs['DR_BASE']
     
 
-        MIN_PAPER_Z = 328.4
+        MIN_PAPER_Z = 327.3
 
         pos_center = posx(563.03, 75.97, 328.62, 9.86, 180.00, 98.32)
         hover_pos  = posx(pos_center[0], pos_center[1], pos_center[2] + 20,

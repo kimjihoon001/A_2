@@ -210,13 +210,25 @@ class RobotArtNode(Node):
         threading.Thread(target=_target, daemon=True).start()
 
     def _svc_gripper_open(self, req, res):
-        self._run_op(self.robot.gripper_open)
+        def _target():
+            self.robot.set_status("running")
+            try:
+                self.robot.gripper_open()
+            finally:
+                self.robot.set_status("idle")
+        threading.Thread(target=_target, daemon=True).start()
         res.success = True
         res.message = '그리퍼 열기'
         return res
 
     def _svc_gripper_close(self, req, res):
-        self._run_op(self.robot.gripper_close)
+        def _target():
+            self.robot.set_status("running")
+            try:
+                self.robot.gripper_close()
+            finally:
+                self.robot.set_status("idle")
+        threading.Thread(target=_target, daemon=True).start()
         res.success = True
         res.message = '그리퍼 닫기'
         return res

@@ -19,3 +19,4 @@ ws_edu/log/
 
 # IDE
 .vscode/
+.claude/

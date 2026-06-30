@@ -14,14 +14,20 @@ log = logging.getLogger(__name__)
 
 
 def _gray_to_force(gray: int, force_min: float = 3.0, force_max: float = 5.0,
-                   steps: list = [50, 100, 150, 200]) -> float | None:
-    """N단계 계단식: steps의 각 경계 이하면 force_max→...→force_min, 초과 시 스킵"""
-    n = len(steps)
-    for i, threshold in enumerate(sorted(steps)):
-        if gray <= threshold:
-            force = force_max - i * (force_max - force_min) / max(n - 1, 1)
-            return round(force, 2)
-    return None
+                   steps: list = None) -> float | None:
+    """단계 매핑: gray 0(검정)→force_max, gray>200 스킵.
+    steps=[50,100,150,200] 이면 각 구간마다 force_max→force_min 균등 배분."""
+    if gray > 200:
+        return None
+    if steps:
+        n = len(steps)
+        for i, threshold in enumerate(steps):
+            if gray <= threshold:
+                force = force_max if n == 1 else force_max - i * (force_max - force_min) / (n - 1)
+                return round(force, 2)
+        return None
+    force = force_max - (gray / 200.0) * (force_max - force_min)
+    return round(force, 2)
 
 
 def _build_path(pixels: list[dict], calibration: dict,

@@ -46,6 +46,6 @@ STATUS_INTERVAL_SEC = 0.2   # 200ms마다 HMI로 상태 전송
 
 # 캘리브레이션 기본값 (DB에 활성 레코드 없을 때 폴백)
 DEFAULT_CALIBRATION = {
-    'origin_x': 356.0,
-    'origin_y': -41.0,
+    'origin_x': 416.0,
+    'origin_y': -16.0,
 }
